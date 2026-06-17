@@ -4,7 +4,7 @@ const fs = require("fs");
 const path = require("path");
 
 const PORT = Number(process.env.PORT || 3000);
-const REFRESH_MS = Number(process.env.REFRESH_MS || 60 * 60 * 1000);
+const REFRESH_MS = Number(process.env.REFRESH_MS || 60 * 1000);
 const FETCH_TIMEOUT_MS = Number(process.env.FETCH_TIMEOUT_MS || 12000);
 const PUBLIC_DIR = path.join(__dirname, "public");
 

@@ -1,6 +1,6 @@
 # Mag 7 Stock Monitor
 
-A local dashboard that monitors the Magnificent 7 stocks hourly:
+A local dashboard that monitors the Magnificent 7 stocks on a near real-time cadence:
 
 - Apple (`AAPL`)
 - Microsoft (`MSFT`)
@@ -24,10 +24,10 @@ Then open:
 http://localhost:3000
 ```
 
-The server refreshes its snapshot every hour. You can override the port or interval:
+The server refreshes its snapshot every 60 seconds. You can override the port or interval:
 
 ```bash
-PORT=4000 REFRESH_MS=900000 npm start
+PORT=4000 REFRESH_MS=15000 npm start
 ```
 
 ## Data Sources
@@ -75,4 +75,4 @@ For a real public deployment, run the container on a cloud host such as Fly.io, 
 
 - Keep the Node server running publicly; the frontend depends on `/api/snapshot`.
 - Static hosts like GitHub Pages alone are not enough because they cannot run the backend API.
-- Public finance endpoints may rate-limit high traffic. For a large audience, replace the public Nasdaq/Google News fetches with a paid market data API and server-side caching.
+- Public finance endpoints may rate-limit high traffic. For a large audience or true tick-by-tick real-time quotes, replace the public Nasdaq/Google News fetches with a paid streaming market data API and server-side caching.
