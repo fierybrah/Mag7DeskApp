@@ -262,7 +262,8 @@ function renderTechnicals(stocks) {
 }
 
 function renderNews() {
-  const symbols = new Set(filteredStocks().map((stock) => stock.symbol));
+  const visibleStocks = filteredStocks();
+  const symbols = new Set(visibleStocks.map((stock) => stock.symbol));
   const query = state.query.trim().toLowerCase();
   const items = (state.data?.news || []).filter((item) => {
     const matchesSymbol = !symbols.size || symbols.has(item.symbol);
@@ -272,14 +273,28 @@ function renderNews() {
     return matchesSymbol && matchesQuery;
   });
 
-  els.newsList.innerHTML = items.length
-    ? items.map((item) => `
+  if (items.length) {
+    els.newsList.innerHTML = items.map((item) => `
       <article class="news-item">
         <a href="${item.link}" target="_blank" rel="noreferrer">${item.title}</a>
         <div class="news-meta">${item.symbol} · ${item.source || "Google News"} · ${dateTime(item.published)}</div>
       </article>
-    `).join("")
-    : `<div class="empty">No news is available for the current filters.</div>`;
+    `).join("");
+    return;
+  }
+
+  const fallbackStocks = visibleStocks.length ? visibleStocks : (state.data?.stocks || []);
+  els.newsList.innerHTML = fallbackStocks.length
+    ? fallbackStocks.map((stock) => {
+      const searchUrl = `https://news.google.com/search?q=${encodeURIComponent(`${stock.symbol} ${stock.name} stock`)}`;
+      return `
+        <article class="news-item news-search-item">
+          <a href="${searchUrl}" target="_blank" rel="noreferrer">${stock.symbol} headline search</a>
+          <div class="news-meta">Open current market headlines for ${stock.name}</div>
+        </article>
+      `;
+    }).join("")
+    : `<div class="empty">Live headlines are still loading. Try refreshing again in a moment.</div>`;
 }
 
 function renderErrors() {
