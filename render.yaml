@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: mag7-stock-monitor
+    env: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: REFRESH_MS
+        value: 3600000
+      - key: FETCH_TIMEOUT_MS
+        value: 12000

@@ -1,0 +1,18 @@
+{
+  "name": "mag7-stock-monitor",
+  "version": "1.0.0",
+  "description": "Hourly Mag 7 stock monitor with news, updates, and technical indicators.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "keywords": [
+    "stocks",
+    "mag7",
+    "finance",
+    "dashboard"
+  ],
+  "author": "",
+  "license": "MIT"
+}
