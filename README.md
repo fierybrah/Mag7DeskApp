@@ -24,15 +24,15 @@ Then open:
 http://localhost:3000
 ```
 
-The server refreshes its snapshot every 60 seconds. You can override the port or interval:
+The server refreshes stock market data every 60 seconds and news every 10 minutes. You can override the port or intervals:
 
 ```bash
-PORT=4000 REFRESH_MS=15000 npm start
+PORT=4000 REFRESH_MS=15000 NEWS_REFRESH_MS=600000 npm start
 ```
 
 ## Data Sources
 
-The app fetches quote, chart, summary, and historical data from Nasdaq public endpoints. It fetches headline RSS data from Google News. These public endpoints can occasionally rate-limit or change behavior; the dashboard keeps running and shows a warning if any live feed cannot be loaded.
+The app fetches quote, chart, summary, and historical data from Nasdaq public endpoints. It fetches headline RSS data from Google News. These public endpoints can occasionally rate-limit or change behavior; the dashboard keeps running, preserves the last successful snapshot where possible, and shows a warning if any live feed cannot be loaded.
 
 ## Share Publicly
 

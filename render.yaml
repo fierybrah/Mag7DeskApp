@@ -10,6 +10,8 @@ services:
       - key: NODE_ENV
         value: production
       - key: REFRESH_MS
-        value: 3600000
+        value: 60000
+      - key: NEWS_REFRESH_MS
+        value: 600000
       - key: FETCH_TIMEOUT_MS
         value: 12000

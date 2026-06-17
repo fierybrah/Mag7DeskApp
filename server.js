@@ -5,6 +5,7 @@ const path = require("path");
 
 const PORT = Number(process.env.PORT || 3000);
 const REFRESH_MS = Number(process.env.REFRESH_MS || 60 * 1000);
+const NEWS_REFRESH_MS = Number(process.env.NEWS_REFRESH_MS || 10 * 60 * 1000);
 const FETCH_TIMEOUT_MS = Number(process.env.FETCH_TIMEOUT_MS || 12000);
 const PUBLIC_DIR = path.join(__dirname, "public");
 
@@ -20,8 +21,11 @@ const STOCKS = [
 
 const state = {
   loading: false,
+  newsLoading: false,
   lastUpdated: null,
+  lastNewsUpdated: null,
   nextRefresh: null,
+  nextNewsRefresh: null,
   errors: [],
   stocks: [],
   news: []
@@ -322,43 +326,22 @@ async function collectSnapshot() {
   state.errors = [];
 
   try {
+    const previousStockMap = new Map(state.stocks.map((stock) => [stock.symbol, stock]));
     const stockResults = await Promise.allSettled(STOCKS.map(fetchNasdaqStock));
     const stockRows = stockResults.map((result, index) => {
       if (result.status === "fulfilled") return result.value;
       state.errors.push(`${STOCKS[index].symbol} market data: ${result.reason.message}`);
-      return fallbackStock(STOCKS[index]);
+      return previousStockMap.get(STOCKS[index].symbol) || fallbackStock(STOCKS[index]);
     });
 
-    const newsResults = await Promise.allSettled(STOCKS.map(async (stock) => {
-      const query = encodeURIComponent(`${stock.symbol} ${stock.name} stock when:7d`);
-      const url = `https://news.google.com/rss/search?q=${query}&hl=en-US&gl=US&ceid=US:en`;
-      const xml = await fetchText(url);
-      return parseRss(xml, stock.symbol);
-    }));
-
-    const news = newsResults.flatMap((result, index) => {
-      if (result.status === "rejected") {
-        state.errors.push(`${STOCKS[index].symbol} news: ${result.reason.message}`);
-        return [];
-      }
-      return result.value;
-    });
-
-    const seen = new Set();
     state.stocks = stockRows;
-    state.news = news.filter((item) => {
-      const key = `${item.title}:${item.link}`;
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    }).sort((a, b) => new Date(b.published || 0) - new Date(a.published || 0)).slice(0, 40);
     state.lastUpdated = new Date().toISOString();
     state.nextRefresh = new Date(Date.now() + REFRESH_MS).toISOString();
+    await collectNews(false);
   } catch (error) {
     state.errors.push(`snapshot: ${error.message}`);
     if (!state.lastUpdated) {
       state.stocks = fallbackStocks();
-      state.news = [];
     }
     state.lastUpdated = new Date().toISOString();
     state.nextRefresh = new Date(Date.now() + REFRESH_MS).toISOString();
@@ -370,6 +353,56 @@ async function collectSnapshot() {
   }
 
   return state;
+}
+
+async function collectNews(force = false) {
+  if (state.newsLoading) return state.news;
+  const shouldRefresh = force || !state.lastNewsUpdated || Date.now() >= Date.parse(state.nextNewsRefresh || 0);
+  if (!shouldRefresh) return state.news;
+
+  state.newsLoading = true;
+  const previousNews = state.news;
+
+  try {
+    const newsResults = await Promise.allSettled(STOCKS.map(async (stock) => {
+      const query = encodeURIComponent(`${stock.symbol} ${stock.name} stock when:7d`);
+      const url = `https://news.google.com/rss/search?q=${query}&hl=en-US&gl=US&ceid=US:en`;
+      const xml = await fetchText(url);
+      return parseRss(xml, stock.symbol);
+    }));
+
+    let newsFailureCount = 0;
+    const news = newsResults.flatMap((result, index) => {
+      if (result.status === "rejected") {
+        newsFailureCount += 1;
+        state.errors.push(`${STOCKS[index].symbol} news: ${result.reason.message}`);
+        return [];
+      }
+      return result.value;
+    });
+
+    const seen = new Set();
+    const freshNews = news.filter((item) => {
+      const key = `${item.title}:${item.link}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    }).sort((a, b) => new Date(b.published || 0) - new Date(a.published || 0)).slice(0, 40);
+    state.news = newsFailureCount && previousNews.length ? previousNews : freshNews;
+    state.lastNewsUpdated = new Date().toISOString();
+    state.nextNewsRefresh = new Date(Date.now() + NEWS_REFRESH_MS).toISOString();
+  } catch (error) {
+    state.errors.push(`news: ${error.message}`);
+    state.news = previousNews;
+    if (!state.lastNewsUpdated) {
+      state.lastNewsUpdated = new Date().toISOString();
+    }
+    state.nextNewsRefresh = new Date(Date.now() + NEWS_REFRESH_MS).toISOString();
+  } finally {
+    state.newsLoading = false;
+  }
+
+  return state.news;
 }
 
 function fallbackStocks() {
@@ -412,10 +445,14 @@ function serializableState() {
 
   return {
     loading: state.loading,
+    newsLoading: state.newsLoading,
     lastUpdated: state.lastUpdated,
+    lastNewsUpdated: state.lastNewsUpdated,
     nextRefresh: state.nextRefresh,
+    nextNewsRefresh: state.nextNewsRefresh,
     errors: state.errors,
     refreshIntervalMs: REFRESH_MS,
+    newsRefreshIntervalMs: NEWS_REFRESH_MS,
     stocks: state.stocks,
     news: state.news
   };
@@ -442,6 +479,7 @@ const server = http.createServer(async (req, res) => {
 
     if (req.url === "/api/refresh" && req.method === "POST") {
       await collectSnapshot();
+      await collectNews(true);
       json(res, 200, serializableState());
       return;
     }
@@ -456,4 +494,5 @@ server.listen(PORT, () => {
   console.log(`Mag 7 monitor running at http://localhost:${PORT}`);
   collectSnapshot();
   setInterval(collectSnapshot, REFRESH_MS);
+  setInterval(() => collectNews(false), NEWS_REFRESH_MS);
 });
