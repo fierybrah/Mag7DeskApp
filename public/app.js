@@ -2,7 +2,8 @@ const state = {
   data: null,
   view: "overview",
   query: "",
-  signal: "all"
+  signal: "all",
+  refreshTimer: null
 };
 
 const els = {
@@ -321,6 +322,13 @@ async function loadSnapshot(refresh = false) {
 
   els.refreshBtn.disabled = false;
   render();
+  scheduleNextSnapshot();
+}
+
+function scheduleNextSnapshot() {
+  window.clearTimeout(state.refreshTimer);
+  const interval = Math.max(state.data?.refreshIntervalMs || 60 * 1000, 15 * 1000);
+  state.refreshTimer = window.setTimeout(() => loadSnapshot(), interval);
 }
 
 document.querySelectorAll(".tab").forEach((tab) => {
@@ -349,4 +357,3 @@ els.refreshBtn.addEventListener("click", () => loadSnapshot(true));
 window.addEventListener("resize", () => renderOverview(filteredStocks()));
 
 loadSnapshot();
-setInterval(() => loadSnapshot(), 60 * 1000);
