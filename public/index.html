@@ -1,1 +1,156 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Mag 7 Monitor</title>
+    <script>
+      if (window.location.protocol === "file:") {
+        window.location.replace("http://localhost:3000/");
+      }
+    </script>
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <header class="site-nav">
+      <a class="brand" href="#top" aria-label="Mag 7 Stock Desk home">
+        <span class="brand-mark">M7</span>
+        <span>Stock Desk</span>
+      </a>
+      <nav class="site-links" aria-label="Site sections">
+        <a href="#dashboard" data-nav-view="overview">Dashboard</a>
+        <a href="#signals" data-nav-view="technicals">Signals</a>
+        <a href="#headlines" data-nav-view="news">Headlines</a>
+      </nav>
+    </header>
 
+    <main id="top" class="shell">
+      <section class="hero-band" aria-label="Mag 7 market snapshot">
+        <div>
+          <p class="eyebrow">Hourly market monitor</p>
+          <h1>Mag 7 Stock Desk</h1>
+          <p class="hero-copy">Live prices, technical posture, and current headlines for the seven stocks moving the market.</p>
+        </div>
+        <div class="actions">
+          <div class="status-pill" id="marketStatus">Loading</div>
+          <button id="refreshBtn" type="button" title="Refresh now" aria-label="Refresh now">
+            <span aria-hidden="true">↻</span>
+          </button>
+        </div>
+      </section>
+
+      <section id="dashboard" class="section-head">
+        <div>
+          <p class="eyebrow">Live dashboard</p>
+          <h2>Prices, ranges, and volume</h2>
+        </div>
+        <p id="dataSource">Source: Nasdaq market data</p>
+      </section>
+
+      <nav class="tabs" aria-label="Dashboard views">
+        <button class="tab active" data-view="overview" type="button">Overview</button>
+        <button class="tab" data-view="technicals" type="button">Technicals</button>
+        <button class="tab" data-view="news" type="button">News</button>
+      </nav>
+
+      <section class="toolbar" aria-label="Filters">
+        <div class="search-wrap">
+          <span aria-hidden="true">⌕</span>
+          <input id="searchInput" type="search" placeholder="Search symbol, company, sector">
+        </div>
+        <select id="signalFilter" aria-label="Technical signal filter">
+          <option value="all">All signals</option>
+          <option value="Bullish">Bullish</option>
+          <option value="Neutral">Neutral</option>
+          <option value="Bearish">Bearish</option>
+          <option value="Unavailable">Unavailable</option>
+        </select>
+      </section>
+
+      <section id="errorPanel" class="error-panel hidden" aria-live="polite"></section>
+
+      <section id="overviewView" class="view active">
+        <section class="summary-grid" aria-label="Market summary">
+          <div class="metric">
+            <span>Combined Market Cap</span>
+            <strong id="totalCap">--</strong>
+          </div>
+          <div class="metric">
+            <span>Advancers</span>
+            <strong id="advancers">--</strong>
+          </div>
+          <div class="metric">
+            <span>Average Move</span>
+            <strong id="avgMove">--</strong>
+          </div>
+          <div class="metric">
+            <span>Next Refresh</span>
+            <strong id="nextRefresh">--</strong>
+          </div>
+        </section>
+        <div id="leaderStrip" class="leader-strip" aria-label="Market leaders"></div>
+        <div id="stockGrid" class="stock-grid" aria-live="polite"></div>
+        <section class="story-grid" aria-label="Market brief">
+          <article class="brief-panel">
+            <span class="panel-label">Market Tone</span>
+            <strong id="marketTone">--</strong>
+            <p id="marketToneDetail">Loading market breadth and technical signals.</p>
+          </article>
+          <article class="brief-panel">
+            <span class="panel-label">Top Mover</span>
+            <strong id="topMover">--</strong>
+            <p id="topMoverDetail">Waiting for the latest snapshot.</p>
+          </article>
+          <article class="brief-panel">
+            <span class="panel-label">Signal Mix</span>
+            <strong id="signalMix">--</strong>
+            <p id="signalMixDetail">SMA and RSI readings update hourly.</p>
+          </article>
+        </section>
+      </section>
+
+      <section id="technicalsView" class="view">
+        <div id="signals" class="section-head compact-head">
+          <div>
+            <p class="eyebrow">Signal board</p>
+            <h2>Technical posture</h2>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Symbol</th>
+                <th>Price</th>
+                <th>SMA 20</th>
+                <th>SMA 50</th>
+                <th>RSI 14</th>
+                <th>Volume Ratio</th>
+                <th>Signal</th>
+              </tr>
+            </thead>
+            <tbody id="technicalRows"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="newsView" class="view">
+        <div id="headlines" class="section-head compact-head">
+          <div>
+            <p class="eyebrow">Market intelligence</p>
+            <h2>Latest headlines</h2>
+          </div>
+        </div>
+        <div id="newsList" class="news-list"></div>
+      </section>
+
+      <footer class="site-footer">
+        <span>Mag 7 Stock Desk</span>
+        <span>Hourly refresh cadence</span>
+        <span>Nasdaq data and Google News headlines</span>
+      </footer>
+    </main>
+
+    <script src="app.js"></script>
+  </body>
+</html>
