@@ -3,12 +3,18 @@ const state = {
   view: "overview",
   query: "",
   signal: "all",
+  technicalSymbol: "GOOGL",
+  candleRange: "fiveMinute",
+  historyRange: "day",
   refreshTimer: null
 };
 
 const els = {
   refreshBtn: document.querySelector("#refreshBtn"),
   marketStatus: document.querySelector("#marketStatus"),
+  toolbar: document.querySelector(".toolbar"),
+  toolbarHome: document.querySelector("#toolbarHome"),
+  signalsHead: document.querySelector("#signals"),
   totalCap: document.querySelector("#totalCap"),
   advancers: document.querySelector("#advancers"),
   avgMove: document.querySelector("#avgMove"),
@@ -22,6 +28,14 @@ const els = {
   leaderStrip: document.querySelector("#leaderStrip"),
   stockGrid: document.querySelector("#stockGrid"),
   technicalRows: document.querySelector("#technicalRows"),
+  technicalSymbol: document.querySelector("#technicalSymbol"),
+  candleTitle: document.querySelector("#candleTitle"),
+  historyTitle: document.querySelector("#historyTitle"),
+  statsTitle: document.querySelector("#statsTitle"),
+  candleChart: document.querySelector("#candleChart"),
+  historyChart: document.querySelector("#historyChart"),
+  profileGrid: document.querySelector("#profileGrid"),
+  statsGrid: document.querySelector("#statsGrid"),
   newsList: document.querySelector("#newsList"),
   errorPanel: document.querySelector("#errorPanel"),
   searchInput: document.querySelector("#searchInput"),
@@ -55,6 +69,11 @@ function number(value) {
   return new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 }).format(value);
 }
 
+function plainNumber(value) {
+  if (!Number.isFinite(value)) return "--";
+  return new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 }).format(value);
+}
+
 function dateTime(value) {
   if (!value) return "--";
   return new Intl.DateTimeFormat("en-US", {
@@ -74,6 +93,21 @@ function filteredStocks() {
     const matchesSignal = state.signal === "all" || stock.technicals?.signal === state.signal;
     return matchesQuery && matchesSignal;
   });
+}
+
+function syncTechnicalSymbolToSearch() {
+  const query = state.query.trim().toLowerCase();
+  if (!query) return;
+
+  const stocks = state.data?.stocks || [];
+  const match = stocks.find((stock) => stock.symbol.toLowerCase() === query)
+    || stocks.find((stock) => stock.symbol.toLowerCase().startsWith(query) && query.length >= 2)
+    || stocks.find((stock) => stock.name.toLowerCase().startsWith(query) && query.length >= 2)
+    || stocks.find((stock) => stock.name.toLowerCase().includes(query) && query.length >= 3);
+
+  if (match) {
+    state.technicalSymbol = match.symbol;
+  }
 }
 
 function drawSparkline(canvas, values, positive) {
@@ -119,6 +153,125 @@ function drawSparkline(canvas, values, positive) {
   ctx.lineWidth = 2.5 * scale;
   ctx.lineCap = "round";
   ctx.strokeStyle = positive ? "#147a54" : "#b33a3a";
+  ctx.stroke();
+}
+
+function setupCanvas(canvas) {
+  const ctx = canvas.getContext("2d");
+  const scale = window.devicePixelRatio || 1;
+  const width = canvas.clientWidth * scale;
+  const height = canvas.clientHeight * scale;
+  canvas.width = width;
+  canvas.height = height;
+  ctx.clearRect(0, 0, width, height);
+  return { ctx, scale, width, height };
+}
+
+function drawEmptyChart(canvas, message) {
+  const { ctx, width, height } = setupCanvas(canvas);
+  ctx.fillStyle = "#647174";
+  ctx.font = "14px system-ui, sans-serif";
+  ctx.textAlign = "center";
+  ctx.fillText(message, width / 2, height / 2);
+}
+
+function chartScale(values, height, pad) {
+  const valid = values.filter(Number.isFinite);
+  const min = Math.min(...valid);
+  const max = Math.max(...valid);
+  const range = max - min || 1;
+  return (value) => height - pad - ((value - min) / range) * (height - pad * 2);
+}
+
+function drawCandles(canvas, candles) {
+  if (!candles?.length) {
+    drawEmptyChart(canvas, "Candles will appear after the next live quote snapshot.");
+    return;
+  }
+
+  const { ctx, scale, width, height } = setupCanvas(canvas);
+  const pad = 18 * scale;
+  const values = candles.flatMap((candle) => [candle.open, candle.high, candle.low, candle.close]);
+  const yFor = chartScale(values, height, pad);
+  const candleWidth = Math.max(4 * scale, (width - pad * 2) / candles.length * 0.56);
+
+  ctx.strokeStyle = "#d9dfd5";
+  ctx.lineWidth = scale;
+  for (let index = 0; index < 4; index += 1) {
+    const y = pad + ((height - pad * 2) / 3) * index;
+    ctx.beginPath();
+    ctx.moveTo(pad, y);
+    ctx.lineTo(width - pad, y);
+    ctx.stroke();
+  }
+
+  candles.forEach((candle, index) => {
+    const x = pad + (index / Math.max(candles.length - 1, 1)) * (width - pad * 2);
+    const openY = yFor(candle.open);
+    const closeY = yFor(candle.close);
+    const highY = yFor(candle.high);
+    const lowY = yFor(candle.low);
+    const positive = candle.close >= candle.open;
+    ctx.strokeStyle = positive ? "#147a54" : "#b33a3a";
+    ctx.fillStyle = positive ? "rgba(20, 122, 84, 0.18)" : "rgba(179, 58, 58, 0.16)";
+
+    ctx.beginPath();
+    ctx.moveTo(x, highY);
+    ctx.lineTo(x, lowY);
+    ctx.stroke();
+    ctx.fillRect(x - candleWidth / 2, Math.min(openY, closeY), candleWidth, Math.max(2 * scale, Math.abs(closeY - openY)));
+    ctx.strokeRect(x - candleWidth / 2, Math.min(openY, closeY), candleWidth, Math.max(2 * scale, Math.abs(closeY - openY)));
+  });
+}
+
+function drawLineChart(canvas, rows) {
+  if (!rows?.length) {
+    drawEmptyChart(canvas, "Historical prices will appear after the next data snapshot.");
+    return;
+  }
+
+  const { ctx, scale, width, height } = setupCanvas(canvas);
+  const pad = 18 * scale;
+  const values = rows.map((row) => row.close).filter(Number.isFinite);
+  const yFor = chartScale(values, height, pad);
+
+  ctx.strokeStyle = "#d9dfd5";
+  ctx.lineWidth = scale;
+  for (let index = 0; index < 4; index += 1) {
+    const y = pad + ((height - pad * 2) / 3) * index;
+    ctx.beginPath();
+    ctx.moveTo(pad, y);
+    ctx.lineTo(width - pad, y);
+    ctx.stroke();
+  }
+
+  const gradient = ctx.createLinearGradient(0, pad, 0, height - pad);
+  gradient.addColorStop(0, "rgba(35, 106, 150, 0.2)");
+  gradient.addColorStop(1, "rgba(255, 255, 255, 0)");
+
+  ctx.beginPath();
+  rows.forEach((row, index) => {
+    const x = pad + (index / Math.max(rows.length - 1, 1)) * (width - pad * 2);
+    const y = yFor(row.close);
+    if (index === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  });
+  ctx.lineTo(width - pad, height - pad);
+  ctx.lineTo(pad, height - pad);
+  ctx.closePath();
+  ctx.fillStyle = gradient;
+  ctx.fill();
+
+  ctx.beginPath();
+  rows.forEach((row, index) => {
+    const x = pad + (index / Math.max(rows.length - 1, 1)) * (width - pad * 2);
+    const y = yFor(row.close);
+    if (index === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  });
+  ctx.strokeStyle = "#236a96";
+  ctx.lineWidth = 2.5 * scale;
+  ctx.lineCap = "round";
   ctx.stroke();
 }
 
@@ -261,6 +414,106 @@ function renderTechnicals(stocks) {
   }).join("") || `<tr><td colspan="7">No stocks match the current filters.</td></tr>`;
 }
 
+function selectedTechnicalStock() {
+  const stocks = state.data?.stocks || [];
+  return stocks.find((stock) => stock.symbol === state.technicalSymbol) || stocks[0] || null;
+}
+
+function renderTechnicalSelector(stocks) {
+  if (!els.technicalSymbol) return;
+  if (!stocks.some((stock) => stock.symbol === state.technicalSymbol) && stocks[0]) {
+    state.technicalSymbol = stocks[0].symbol;
+  }
+  els.technicalSymbol.innerHTML = stocks.map((stock) => `
+    <option value="${stock.symbol}" ${stock.symbol === state.technicalSymbol ? "selected" : ""}>${stock.symbol} · ${stock.name}</option>
+  `).join("");
+}
+
+function renderStats(stock) {
+  if (!stock) {
+    els.profileGrid.innerHTML = "";
+    els.statsGrid.innerHTML = `<div class="empty">Select a stock to view technical stats.</div>`;
+    return;
+  }
+
+  const profile = [
+    ["CEO", stock.ceo || "--"],
+    ["Founded", stock.founded || "--"],
+    ["Employees", plainNumber(stock.employees)],
+    ["Headquarters", stock.headquarters || "--"]
+  ];
+
+  const stats = [
+    ["Bid", money(stock.stats?.bid ?? stock.bid)],
+    ["Ask", money(stock.stats?.ask ?? stock.ask)],
+    ["Volume", compact(stock.stats?.volume ?? stock.volume)],
+    ["Average vol", compact(stock.stats?.averageVolume ?? stock.averageVolume)],
+    ["Open", money(stock.stats?.open ?? stock.open)],
+    ["Today’s high", money(stock.stats?.dayHigh ?? stock.dayHigh)],
+    ["Today’s low", money(stock.stats?.dayLow ?? stock.dayLow)],
+    ["Market cap", compact(stock.stats?.marketCap ?? stock.marketCap)],
+    ["52-week high", money(stock.stats?.fiftyTwoWeekHigh ?? stock.fiftyTwoWeekHigh)],
+    ["52-week low", money(stock.stats?.fiftyTwoWeekLow ?? stock.fiftyTwoWeekLow)],
+    ["P/E ratio", number(stock.stats?.pe ?? stock.pe)],
+    ["EPS", money(stock.stats?.eps ?? stock.eps)],
+    ["Dividend yield", Number.isFinite(stock.stats?.dividendYield ?? stock.dividendYield) ? `${number(stock.stats?.dividendYield ?? stock.dividendYield)}%` : "--"],
+    ["Previous close", money(stock.stats?.previousClose ?? stock.previousClose)],
+    ["SMA 20", money(stock.technicals?.sma20)],
+    ["SMA 50", money(stock.technicals?.sma50)],
+    ["RSI 14", number(stock.technicals?.rsi14)],
+    ["Volume ratio", Number.isFinite(stock.technicals?.volumeRatio) ? `${number(stock.technicals.volumeRatio)}x` : "--"],
+    ["Signal", stock.technicals?.signal || "Unavailable"]
+  ];
+
+  els.profileGrid.innerHTML = profile.map(([label, value]) => `
+    <div class="profile-stat">
+      <span>${label}</span>
+      <strong>${value}</strong>
+    </div>
+  `).join("");
+
+  els.statsGrid.innerHTML = stats.map(([label, value]) => `
+    <div class="stat-cell">
+      <span>${label}</span>
+      <strong>${value}</strong>
+    </div>
+  `).join("");
+}
+
+function renderTechnicalWorkspace() {
+  const stocks = state.data?.stocks || [];
+  renderTechnicalSelector(stocks);
+  const stock = selectedTechnicalStock();
+
+  if (!stock) {
+    drawEmptyChart(els.candleChart, "Waiting for market data.");
+    drawEmptyChart(els.historyChart, "Waiting for historical data.");
+    renderStats(null);
+    return;
+  }
+
+  const candleLabels = {
+    fiveMinute: "5 minute",
+    fifteenMinute: "15 minute",
+    thirtyMinute: "30 minute"
+  };
+  const historyLabels = {
+    day: "Day",
+    week: "Week",
+    threeMonth: "3 months",
+    sixMonth: "6 months",
+    oneYear: "1 year",
+    all: "All available"
+  };
+
+  els.candleTitle.textContent = `${stock.symbol} · ${candleLabels[state.candleRange]}`;
+  els.historyTitle.textContent = `${stock.symbol} · ${historyLabels[state.historyRange]}`;
+  els.statsTitle.textContent = `${money(stock.price)} ${stock.symbol}`;
+  drawCandles(els.candleChart, stock.candles?.[state.candleRange] || []);
+  drawLineChart(els.historyChart, stock.history?.[state.historyRange] || []);
+  renderStats(stock);
+}
+
 function renderNews() {
   const visibleStocks = filteredStocks();
   const symbols = new Set(visibleStocks.map((stock) => stock.symbol));
@@ -313,6 +566,7 @@ function render() {
   renderLeaders(stocks);
   renderOverview(stocks);
   renderTechnicals(stocks);
+  renderTechnicalWorkspace();
   renderNews();
 }
 
@@ -324,6 +578,14 @@ function activateView(view) {
   document.querySelectorAll(".view").forEach((viewEl) => {
     viewEl.classList.toggle("active", viewEl.id === `${view}View`);
   });
+  if (view === "technicals") {
+    els.signalsHead.before(els.toolbar);
+  } else {
+    els.toolbarHome.after(els.toolbar);
+  }
+  if (view === "technicals" && state.data) {
+    window.requestAnimationFrame(renderTechnicalWorkspace);
+  }
 }
 
 async function loadSnapshot(refresh = false) {
@@ -334,6 +596,7 @@ async function loadSnapshot(refresh = false) {
     method: refresh ? "POST" : "GET"
   });
   state.data = await response.json();
+  syncTechnicalSymbolToSearch();
 
   els.refreshBtn.disabled = false;
   render();
@@ -360,6 +623,7 @@ document.querySelectorAll("[data-nav-view]").forEach((link) => {
 
 els.searchInput.addEventListener("input", (event) => {
   state.query = event.target.value;
+  syncTechnicalSymbolToSearch();
   render();
 });
 
@@ -368,7 +632,35 @@ els.signalFilter.addEventListener("change", (event) => {
   render();
 });
 
+els.technicalSymbol.addEventListener("change", (event) => {
+  state.technicalSymbol = event.target.value;
+  render();
+});
+
+document.querySelectorAll("[data-candle-range]").forEach((button) => {
+  button.addEventListener("click", () => {
+    state.candleRange = button.dataset.candleRange;
+    document.querySelectorAll("[data-candle-range]").forEach((item) => {
+      item.classList.toggle("active", item.dataset.candleRange === state.candleRange);
+    });
+    renderTechnicalWorkspace();
+  });
+});
+
+document.querySelectorAll("[data-history-range]").forEach((button) => {
+  button.addEventListener("click", () => {
+    state.historyRange = button.dataset.historyRange;
+    document.querySelectorAll("[data-history-range]").forEach((item) => {
+      item.classList.toggle("active", item.dataset.historyRange === state.historyRange);
+    });
+    renderTechnicalWorkspace();
+  });
+});
+
 els.refreshBtn.addEventListener("click", () => loadSnapshot(true));
-window.addEventListener("resize", () => renderOverview(filteredStocks()));
+window.addEventListener("resize", () => {
+  renderOverview(filteredStocks());
+  renderTechnicalWorkspace();
+});
 
 loadSnapshot();

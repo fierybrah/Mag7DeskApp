@@ -53,6 +53,7 @@
         <button class="tab" data-view="news" type="button">News</button>
       </nav>
 
+      <div id="toolbarHome"></div>
       <section class="toolbar" aria-label="Filters">
         <div class="search-wrap">
           <span aria-hidden="true">⌕</span>
@@ -115,7 +116,51 @@
             <p class="eyebrow">Signal board</p>
             <h2>Technical posture</h2>
           </div>
+          <select id="technicalSymbol" aria-label="Technical stock selector"></select>
         </div>
+        <section class="technical-workspace" aria-label="Selected stock technical charts and stats">
+          <article class="chart-panel">
+            <div class="panel-head">
+              <div>
+                <span class="panel-label">Candlestick chart</span>
+                <strong id="candleTitle">--</strong>
+              </div>
+              <div class="segmented" aria-label="Candlestick interval">
+                <button class="mini-tab active" data-candle-range="fiveMinute" type="button">5m</button>
+                <button class="mini-tab" data-candle-range="fifteenMinute" type="button">15m</button>
+                <button class="mini-tab" data-candle-range="thirtyMinute" type="button">30m</button>
+              </div>
+            </div>
+            <canvas id="candleChart" class="market-chart" aria-label="Candlestick chart"></canvas>
+          </article>
+          <article class="chart-panel">
+            <div class="panel-head">
+              <div>
+                <span class="panel-label">Historical chart</span>
+                <strong id="historyTitle">--</strong>
+              </div>
+              <div class="segmented wide" aria-label="Historical range">
+                <button class="mini-tab active" data-history-range="day" type="button">Day</button>
+                <button class="mini-tab" data-history-range="week" type="button">Week</button>
+                <button class="mini-tab" data-history-range="threeMonth" type="button">3M</button>
+                <button class="mini-tab" data-history-range="sixMonth" type="button">6M</button>
+                <button class="mini-tab" data-history-range="oneYear" type="button">1Y</button>
+                <button class="mini-tab" data-history-range="all" type="button">All</button>
+              </div>
+            </div>
+            <canvas id="historyChart" class="market-chart" aria-label="Historical price chart"></canvas>
+          </article>
+          <article class="stats-panel">
+            <div class="panel-head">
+              <div>
+                <span class="panel-label">Full technicals</span>
+                <strong id="statsTitle">--</strong>
+              </div>
+            </div>
+            <div id="profileGrid" class="profile-grid"></div>
+            <div id="statsGrid" class="stats-grid"></div>
+          </article>
+        </section>
         <div class="table-wrap">
           <table>
             <thead>
