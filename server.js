@@ -10,13 +10,13 @@ const FETCH_TIMEOUT_MS = Number(process.env.FETCH_TIMEOUT_MS || 12000);
 const PUBLIC_DIR = path.join(__dirname, "public");
 
 const STOCKS = [
-  { symbol: "AAPL", name: "Apple", sector: "Consumer Hardware" },
-  { symbol: "MSFT", name: "Microsoft", sector: "Cloud & Software" },
-  { symbol: "GOOGL", name: "Alphabet", sector: "Search & AI" },
-  { symbol: "AMZN", name: "Amazon", sector: "Commerce & Cloud" },
-  { symbol: "NVDA", name: "NVIDIA", sector: "AI Semiconductors" },
-  { symbol: "META", name: "Meta", sector: "Social & Ads" },
-  { symbol: "TSLA", name: "Tesla", sector: "EVs & Energy" }
+  { symbol: "AAPL", name: "Apple", sector: "Consumer Hardware", ceo: "Tim Cook", founded: "1976", headquarters: "Cupertino, California", employees: 164000 },
+  { symbol: "MSFT", name: "Microsoft", sector: "Cloud & Software", ceo: "Satya Nadella", founded: "1975", headquarters: "Redmond, Washington", employees: 228000 },
+  { symbol: "GOOGL", name: "Alphabet", sector: "Search & AI", ceo: "Sundar Pichai", founded: "2015", headquarters: "Mountain View, California", employees: 190820 },
+  { symbol: "AMZN", name: "Amazon", sector: "Commerce & Cloud", ceo: "Andy Jassy", founded: "1994", headquarters: "Seattle, Washington", employees: 1551000 },
+  { symbol: "NVDA", name: "NVIDIA", sector: "AI Semiconductors", ceo: "Jensen Huang", founded: "1993", headquarters: "Santa Clara, California", employees: 29600 },
+  { symbol: "META", name: "Meta", sector: "Social & Ads", ceo: "Mark Zuckerberg", founded: "2004", headquarters: "Menlo Park, California", employees: 69329 },
+  { symbol: "TSLA", name: "Tesla", sector: "EVs & Energy", ceo: "Elon Musk", founded: "2003", headquarters: "Austin, Texas", employees: 140473 }
 ];
 
 const state = {
@@ -145,6 +145,12 @@ function formatNumber(value) {
   return Number.isFinite(value) ? Number(value.toFixed(2)) : null;
 }
 
+function compactHistory(rows, maxPoints = 260) {
+  if (rows.length <= maxPoints) return rows;
+  const step = Math.ceil(rows.length / maxPoints);
+  return rows.filter((row, index) => index % step === 0 || index === rows.length - 1);
+}
+
 function parseNumber(value) {
   if (typeof value === "number") return Number.isFinite(value) ? value : null;
   if (!value || value === "N/A") return null;
@@ -213,9 +219,50 @@ function parseHistoricalRows(payload) {
   })).filter((row) => Number.isFinite(row.close)).reverse();
 }
 
+function chartPoints(chartPayload) {
+  return (chartPayload?.data?.chart || []).map((point, index) => {
+    const price = parseNumber(point.y);
+    if (!Number.isFinite(price)) return null;
+    const rawTime = point.x || point.z || point.time || point.label || "";
+    const parsedTime = Date.parse(rawTime);
+    return {
+      time: Number.isFinite(parsedTime) ? new Date(parsedTime).toISOString() : rawTime || String(index + 1),
+      price
+    };
+  }).filter(Boolean);
+}
+
+function buildCandles(points, bucketSize) {
+  const candles = [];
+  for (let index = 0; index < points.length; index += bucketSize) {
+    const bucket = points.slice(index, index + bucketSize);
+    if (!bucket.length) continue;
+    const prices = bucket.map((point) => point.price);
+    candles.push({
+      time: bucket.at(-1).time,
+      open: formatNumber(prices[0]),
+      high: formatNumber(Math.max(...prices)),
+      low: formatNumber(Math.min(...prices)),
+      close: formatNumber(prices.at(-1))
+    });
+  }
+  return candles.slice(-90);
+}
+
+function buildHistoricalRanges(historyRows) {
+  const take = (count) => compactHistory(historyRows.slice(-count));
+  return {
+    day: take(2),
+    week: take(7),
+    threeMonth: take(63),
+    sixMonth: take(126),
+    oneYear: take(252),
+    all: compactHistory(historyRows)
+  };
+}
+
 function sparkline(chartPayload, historyRows) {
-  const intraday = chartPayload?.data?.chart || [];
-  const values = intraday.map((point) => parseNumber(point.y)).filter(Number.isFinite);
+  const values = chartPoints(chartPayload).map((point) => point.price);
   if (values.length) {
     return values.slice(-80).map((value) => formatNumber(value));
   }
@@ -265,7 +312,7 @@ function nasdaqUrl(symbol, endpoint, params = "") {
 
 async function fetchNasdaqStock(stock) {
   const today = new Date();
-  const start = new Date(Date.now() - 110 * 24 * 60 * 60 * 1000);
+  const start = new Date("1980-01-01T00:00:00Z");
   const [chartData, summaryData, historicalData] = await Promise.all([
     fetchJson(nasdaqUrl(stock.symbol, "chart")),
     fetchJson(nasdaqUrl(stock.symbol, "summary")),
@@ -275,12 +322,21 @@ async function fetchNasdaqStock(stock) {
   const chart = chartData.data || {};
   const summary = summaryData.data?.summaryData || {};
   const historyRows = parseHistoricalRows(historicalData);
+  const intradayPoints = chartPoints(chartData);
   const [dayHigh, dayLow] = parseRange(summary.TodayHighLow?.value);
   const [fiftyTwoWeekHigh, fiftyTwoWeekLow] = parseRange(summary.FiftTwoWeekHighLow?.value);
   const price = parseNumber(chart.lastSalePrice);
   const previousClose = parseNumber(chart.previousClose);
   const change = parseNumber(chart.netChange);
   const changePercent = parseNumber(chart.percentageChange);
+  const open = parseNumber(summary.OpenPrice?.value || summary.Open?.value || historyRows.at(-1)?.open);
+  const bid = parseNumber(summary.Bid?.value || summary.BidPrice?.value);
+  const ask = parseNumber(summary.Ask?.value || summary.AskPrice?.value);
+  const pe = parseNumber(summary.PERatio?.value || summary.PeRatio?.value || summary.PERatio?.value);
+  const eps = parseNumber(summary.EPS?.value || summary.EarningsPerShare?.value);
+  const dividendYield = parseNumber(summary.Yield?.value || summary.DividendYield?.value);
+  const volume = parseNumber(chart.volume || summary.ShareVolume?.value);
+  const averageVolume = parseNumber(summary.AverageVolume?.value);
 
   return {
     ...stock,
@@ -288,18 +344,44 @@ async function fetchNasdaqStock(stock) {
     change: formatNumber(change),
     changePercent: formatNumber(changePercent),
     marketCap: parseNumber(summary.MarketCap?.value),
-    pe: null,
-    eps: null,
+    pe: formatNumber(pe),
+    eps: formatNumber(eps),
+    dividendYield: formatNumber(dividendYield),
+    open: formatNumber(open),
+    bid: formatNumber(bid),
+    ask: formatNumber(ask),
     dayLow: formatNumber(dayLow),
     dayHigh: formatNumber(dayHigh),
     fiftyTwoWeekLow: formatNumber(fiftyTwoWeekLow),
     fiftyTwoWeekHigh: formatNumber(fiftyTwoWeekHigh),
-    volume: parseNumber(chart.volume || summary.ShareVolume?.value),
-    averageVolume: parseNumber(summary.AverageVolume?.value),
+    volume,
+    averageVolume,
     exchange: summary.Exchange?.value || chart.exchange || "",
     marketState: chart.marketStatus || "",
     previousClose: formatNumber(previousClose),
     technicals: calculateTechnicals(historyRows),
+    candles: {
+      fiveMinute: buildCandles(intradayPoints, 5),
+      fifteenMinute: buildCandles(intradayPoints, 15),
+      thirtyMinute: buildCandles(intradayPoints, 30)
+    },
+    history: buildHistoricalRanges(historyRows),
+    stats: {
+      bid: formatNumber(bid),
+      ask: formatNumber(ask),
+      volume,
+      averageVolume,
+      open: formatNumber(open),
+      dayHigh: formatNumber(dayHigh),
+      dayLow: formatNumber(dayLow),
+      marketCap: parseNumber(summary.MarketCap?.value),
+      fiftyTwoWeekHigh: formatNumber(fiftyTwoWeekHigh),
+      fiftyTwoWeekLow: formatNumber(fiftyTwoWeekLow),
+      pe: formatNumber(pe),
+      eps: formatNumber(eps),
+      dividendYield: formatNumber(dividendYield),
+      previousClose: formatNumber(previousClose)
+    },
     series: sparkline(chartData, historyRows),
     source: "Nasdaq"
   };
@@ -424,9 +506,16 @@ function fallbackStock(stock) {
     fiftyTwoWeekHigh: null,
     volume: null,
     averageVolume: null,
+    dividendYield: null,
+    open: null,
+    bid: null,
+    ask: null,
     exchange: "",
     marketState: "",
     technicals: { sma20: null, sma50: null, rsi14: null, volumeRatio: null, signal: "Unavailable" },
+    candles: { fiveMinute: [], fifteenMinute: [], thirtyMinute: [] },
+    history: { day: [], week: [], threeMonth: [], sixMonth: [], oneYear: [], all: [] },
+    stats: {},
     series: []
   };
 }
