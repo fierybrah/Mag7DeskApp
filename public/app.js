@@ -6,6 +6,7 @@ const state = {
   technicalSymbol: "GOOGL",
   candlePeriod: "week",
   candleInterval: "5m",
+  candleZoom: 1,
   historyRange: "day",
   candleData: {},
   candleLoadingKey: null,
@@ -40,6 +41,9 @@ const els = {
   historyTitle: document.querySelector("#historyTitle"),
   statsTitle: document.querySelector("#statsTitle"),
   candleChart: document.querySelector("#candleChart"),
+  candleZoomIn: document.querySelector("#candleZoomIn"),
+  candleZoomOut: document.querySelector("#candleZoomOut"),
+  candleZoomReset: document.querySelector("#candleZoomReset"),
   historyChart: document.querySelector("#historyChart"),
   candleReadout: document.querySelector("#candleReadout"),
   historyReadout: document.querySelector("#historyReadout"),
@@ -355,6 +359,31 @@ function drawCandles(canvas, candles, range = "day", emptyMessage) {
   state.chartMeta.candle = meta;
 }
 
+function zoomedCandles(candles) {
+  if (!candles?.length || state.candleZoom <= 1) return candles || [];
+  const count = Math.max(12, Math.ceil(candles.length / state.candleZoom));
+  return candles.slice(-count);
+}
+
+function updateCandleZoomControls(candles) {
+  const maxZoom = candles?.length > 24 ? 16 : 1;
+  els.candleZoomIn.disabled = state.candleZoom >= maxZoom;
+  els.candleZoomOut.disabled = state.candleZoom <= 1;
+  els.candleZoomReset.disabled = state.candleZoom <= 1;
+}
+
+function disableCandleZoomControls() {
+  els.candleZoomIn.disabled = true;
+  els.candleZoomOut.disabled = true;
+  els.candleZoomReset.disabled = true;
+}
+
+function changeCandleZoom(direction) {
+  const nextZoom = direction === "in" ? state.candleZoom * 2 : state.candleZoom / 2;
+  state.candleZoom = Math.max(1, Math.min(16, nextZoom));
+  renderTechnicalWorkspace();
+}
+
 function drawLineChart(canvas, rows) {
   if (!rows?.length) {
     drawEmptyChart(canvas, "Historical prices will appear after the next data snapshot.");
@@ -642,6 +671,7 @@ function renderTechnicalWorkspace() {
 
   if (!stock) {
     drawEmptyChart(els.candleChart, "Waiting for market data.");
+    disableCandleZoomControls();
     drawEmptyChart(els.historyChart, "Waiting for historical data.");
     renderStats(null);
     return;
@@ -673,12 +703,18 @@ function renderTechnicalWorkspace() {
   if (!candleData) {
     drawEmptyChart(els.candleChart, "Loading detailed candles...");
     state.chartMeta.candle = [];
+    disableCandleZoomControls();
     els.candleReadout.textContent = "Fetching candle data for the selected period and interval.";
     loadDetailedCandles(stock.symbol);
   } else {
-    drawCandles(els.candleChart, candleData.candles || [], state.candlePeriod, candleData.note);
+    const visibleCandles = zoomedCandles(candleData.candles || []);
+    drawCandles(els.candleChart, visibleCandles, state.candlePeriod, candleData.note);
+    updateCandleZoomControls(candleData.candles || []);
     if (state.chartMeta.candle.length) {
       updateChartReadout("candle", state.chartMeta.candle.at(-1));
+      if (state.candleZoom > 1) {
+        els.candleReadout.textContent += ` · ${state.candleZoom}x zoom: latest ${visibleCandles.length.toLocaleString()} candles shown.`;
+      }
     } else {
       els.candleReadout.textContent = "No candles are available for this selection.";
     }
@@ -811,12 +847,14 @@ els.signalFilter.addEventListener("change", (event) => {
 
 els.technicalSymbol.addEventListener("change", (event) => {
   state.technicalSymbol = event.target.value;
+  state.candleZoom = 1;
   render();
 });
 
 document.querySelectorAll("[data-candle-period]").forEach((button) => {
   button.addEventListener("click", () => {
     state.candlePeriod = button.dataset.candlePeriod;
+    state.candleZoom = 1;
     document.querySelectorAll("[data-candle-period]").forEach((item) => {
       item.classList.toggle("active", item.dataset.candlePeriod === state.candlePeriod);
     });
@@ -827,11 +865,19 @@ document.querySelectorAll("[data-candle-period]").forEach((button) => {
 document.querySelectorAll("[data-candle-interval]").forEach((button) => {
   button.addEventListener("click", () => {
     state.candleInterval = button.dataset.candleInterval;
+    state.candleZoom = 1;
     document.querySelectorAll("[data-candle-interval]").forEach((item) => {
       item.classList.toggle("active", item.dataset.candleInterval === state.candleInterval);
     });
     renderTechnicalWorkspace();
   });
+});
+
+els.candleZoomIn.addEventListener("click", () => changeCandleZoom("in"));
+els.candleZoomOut.addEventListener("click", () => changeCandleZoom("out"));
+els.candleZoomReset.addEventListener("click", () => {
+  state.candleZoom = 1;
+  renderTechnicalWorkspace();
 });
 
 document.querySelectorAll("[data-history-range]").forEach((button) => {
@@ -848,6 +894,11 @@ document.querySelectorAll("[data-history-range]").forEach((button) => {
   els.candleChart.addEventListener(eventName, (event) => handleChartPointer("candle", event));
   els.historyChart.addEventListener(eventName, (event) => handleChartPointer("history", event));
 });
+
+els.candleChart.addEventListener("wheel", (event) => {
+  event.preventDefault();
+  changeCandleZoom(event.deltaY < 0 ? "in" : "out");
+}, { passive: false });
 
 els.refreshBtn.addEventListener("click", () => loadSnapshot(true));
 window.addEventListener("resize", () => {

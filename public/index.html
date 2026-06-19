@@ -138,6 +138,11 @@
                   <button class="mini-tab" data-candle-interval="15m" type="button">15m</button>
                   <button class="mini-tab" data-candle-interval="30m" type="button">30m</button>
                 </div>
+                <div class="chart-zoom" aria-label="Candlestick chart zoom controls">
+                  <button id="candleZoomOut" type="button" aria-label="Zoom out" title="Zoom out" disabled>−</button>
+                  <button id="candleZoomReset" type="button" aria-label="Reset chart zoom" title="Reset chart zoom" disabled>↺</button>
+                  <button id="candleZoomIn" type="button" aria-label="Zoom in" title="Zoom in" disabled>+</button>
+                </div>
               </div>
             </div>
             <canvas id="candleChart" class="market-chart" aria-label="Candlestick chart"></canvas>

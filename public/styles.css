@@ -537,6 +537,18 @@ select {
   justify-items: end;
 }
 
+.chart-zoom {
+  display: flex;
+  gap: 6px;
+}
+
+.chart-zoom button {
+  width: 34px;
+  height: 34px;
+  font-size: 1.1rem;
+  font-weight: 800;
+}
+
 .mini-tab {
   width: auto;
   min-width: 44px;
