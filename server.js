@@ -372,6 +372,7 @@ function buildHistoricalRanges(historyRows) {
 
 function yahooRangeForPeriod(period) {
   const ranges = {
+    day: "1d",
     week: "7d",
     threeMonth: "60d",
     sixMonth: "60d",
@@ -383,6 +384,7 @@ function yahooRangeForPeriod(period) {
 
 function alpacaStartForPeriod(period) {
   const days = {
+    day: 1,
     week: 7,
     threeMonth: 92,
     sixMonth: 184,
@@ -401,12 +403,13 @@ function alpacaTimeframe(interval) {
 }
 
 function candleLimitNote(period, interval) {
-  if (period === "week") return "";
+  if (period === "day" || period === "week") return "";
   return `The requested ${periodLabel(period)} view is limited to the most recent 60 days for ${interval} candles by the public market data provider.`;
 }
 
 function periodLabel(period) {
   return {
+    day: "1 day",
     week: "1 week",
     threeMonth: "3 months",
     sixMonth: "6 months",
@@ -505,7 +508,7 @@ async function fetchAlpacaCandles(symbol, period, interval) {
 async function fetchDetailedCandles(symbol, period, interval) {
   const stock = STOCKS.find((item) => item.symbol === symbol);
   if (!stock) throw new Error("Unsupported symbol");
-  if (!["week", "threeMonth", "sixMonth", "oneYear", "all"].includes(period)) throw new Error("Unsupported period");
+  if (!["day", "week", "threeMonth", "sixMonth", "oneYear", "all"].includes(period)) throw new Error("Unsupported period");
   if (!["5m", "15m", "30m"].includes(interval)) throw new Error("Unsupported interval");
 
   const range = yahooRangeForPeriod(period);
