@@ -4,8 +4,15 @@ const state = {
   query: "",
   signal: "all",
   technicalSymbol: "GOOGL",
-  candleRange: "fiveMinute",
+  candlePeriod: "week",
+  candleInterval: "5m",
   historyRange: "day",
+  candleData: {},
+  candleLoadingKey: null,
+  chartMeta: {
+    candle: [],
+    history: []
+  },
   refreshTimer: null
 };
 
@@ -34,6 +41,8 @@ const els = {
   statsTitle: document.querySelector("#statsTitle"),
   candleChart: document.querySelector("#candleChart"),
   historyChart: document.querySelector("#historyChart"),
+  candleReadout: document.querySelector("#candleReadout"),
+  historyReadout: document.querySelector("#historyReadout"),
   profileGrid: document.querySelector("#profileGrid"),
   statsGrid: document.querySelector("#statsGrid"),
   newsList: document.querySelector("#newsList"),
@@ -110,6 +119,42 @@ function syncTechnicalSymbolToSearch() {
   }
 }
 
+function candleKey(symbol = state.technicalSymbol) {
+  return `${symbol}:${state.candlePeriod}:${state.candleInterval}`;
+}
+
+async function loadDetailedCandles(symbol) {
+  const key = candleKey(symbol);
+  if (state.candleData[key] || state.candleLoadingKey === key) return;
+
+  state.candleLoadingKey = key;
+  try {
+    const params = new URLSearchParams({
+      symbol,
+      period: state.candlePeriod,
+      interval: state.candleInterval
+    });
+    const response = await fetch(`/api/candles?${params}`);
+    if (!response.ok) throw new Error(`Candles failed with ${response.status}`);
+    state.candleData[key] = await response.json();
+  } catch (error) {
+    state.candleData[key] = {
+      symbol,
+      period: state.candlePeriod,
+      interval: state.candleInterval,
+      note: error.message,
+      candles: []
+    };
+  } finally {
+    if (state.candleLoadingKey === key) {
+      state.candleLoadingKey = null;
+    }
+    if (candleKey(symbol) === key) {
+      renderTechnicalWorkspace();
+    }
+  }
+}
+
 function drawSparkline(canvas, values, positive) {
   const ctx = canvas.getContext("2d");
   const scale = window.devicePixelRatio || 1;
@@ -175,42 +220,126 @@ function drawEmptyChart(canvas, message) {
   ctx.fillText(message, width / 2, height / 2);
 }
 
-function chartScale(values, height, pad) {
+function chartScale(values, top, bottom) {
   const valid = values.filter(Number.isFinite);
   const min = Math.min(...valid);
   const max = Math.max(...valid);
   const range = max - min || 1;
-  return (value) => height - pad - ((value - min) / range) * (height - pad * 2);
+  return {
+    min,
+    max,
+    yFor: (value) => bottom - ((value - min) / range) * (bottom - top)
+  };
 }
 
-function drawCandles(canvas, candles) {
+function shortPrice(value) {
+  if (!Number.isFinite(value)) return "--";
+  return `$${new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 }).format(value)}`;
+}
+
+function parseChartDate(value) {
+  if (!value) return null;
+  if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value;
+  const parsed = new Date(value);
+  if (!Number.isNaN(parsed.getTime())) return parsed;
+
+  const match = String(value).match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
+  if (!match) return null;
+  const year = Number(match[3].length === 2 ? `20${match[3]}` : match[3]);
+  return new Date(year, Number(match[1]) - 1, Number(match[2]));
+}
+
+function formatChartTime(value, mode = "date") {
+  const parsed = parseChartDate(value);
+  if (!parsed) return String(value || "--");
+  const options = mode === "time"
+    ? { hour: "numeric", minute: "2-digit" }
+    : mode === "dateTime"
+      ? { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }
+      : { month: "short", day: "numeric", year: "numeric" };
+  return new Intl.DateTimeFormat("en-US", options).format(parsed);
+}
+
+function formatAxisDate(value, range) {
+  const parsed = parseChartDate(value);
+  if (!parsed) return String(value || "");
+  const options = range === "intraday"
+    ? { hour: "numeric", minute: "2-digit" }
+    : range === "day"
+    ? { month: "short", day: "numeric" }
+    : range === "all" || range === "oneYear" || range === "sixMonth"
+      ? { month: "short", year: "2-digit" }
+      : { month: "short", day: "numeric" };
+  return new Intl.DateTimeFormat("en-US", options).format(parsed);
+}
+
+function drawAxes(ctx, scale, width, height, values, labels, range = "day") {
+  const plot = {
+    left: 58 * scale,
+    right: width - 14 * scale,
+    top: 16 * scale,
+    bottom: height - 34 * scale
+  };
+  const yScale = chartScale(values, plot.top, plot.bottom);
+
+  ctx.strokeStyle = "#d9dfd5";
+  ctx.fillStyle = "#647174";
+  ctx.lineWidth = scale;
+  ctx.font = `${11 * scale}px system-ui, sans-serif`;
+  ctx.textBaseline = "middle";
+  ctx.textAlign = "right";
+
+  for (let index = 0; index < 4; index += 1) {
+    const ratio = index / 3;
+    const y = plot.top + (plot.bottom - plot.top) * ratio;
+    const value = yScale.max - (yScale.max - yScale.min) * ratio;
+    ctx.beginPath();
+    ctx.moveTo(plot.left, y);
+    ctx.lineTo(plot.right, y);
+    ctx.stroke();
+    ctx.fillText(shortPrice(value), plot.left - 8 * scale, y);
+  }
+
+  ctx.textBaseline = "top";
+  ctx.textAlign = "center";
+  const labelIndexes = labels.length <= 2
+    ? labels.map((_, index) => index)
+    : [0, Math.floor((labels.length - 1) / 2), labels.length - 1];
+  labelIndexes.forEach((index) => {
+    const x = plot.left + (index / Math.max(labels.length - 1, 1)) * (plot.right - plot.left);
+    ctx.fillText(formatAxisDate(labels[index], range), x, plot.bottom + 10 * scale);
+  });
+
+  ctx.save();
+  ctx.translate(13 * scale, plot.top + (plot.bottom - plot.top) / 2);
+  ctx.rotate(-Math.PI / 2);
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText("Price", 0, 0);
+  ctx.restore();
+
+  return { plot, yScale };
+}
+
+function drawCandles(canvas, candles, range = "day", emptyMessage) {
   if (!candles?.length) {
-    drawEmptyChart(canvas, "Candles will appear after the next live quote snapshot.");
+    drawEmptyChart(canvas, emptyMessage || "No detailed candles are available for this selection.");
+    state.chartMeta.candle = [];
     return;
   }
 
   const { ctx, scale, width, height } = setupCanvas(canvas);
-  const pad = 18 * scale;
   const values = candles.flatMap((candle) => [candle.open, candle.high, candle.low, candle.close]);
-  const yFor = chartScale(values, height, pad);
-  const candleWidth = Math.max(4 * scale, (width - pad * 2) / candles.length * 0.56);
-
-  ctx.strokeStyle = "#d9dfd5";
-  ctx.lineWidth = scale;
-  for (let index = 0; index < 4; index += 1) {
-    const y = pad + ((height - pad * 2) / 3) * index;
-    ctx.beginPath();
-    ctx.moveTo(pad, y);
-    ctx.lineTo(width - pad, y);
-    ctx.stroke();
-  }
+  const { plot, yScale } = drawAxes(ctx, scale, width, height, values, candles.map((candle) => candle.time || candle.date), range);
+  const candleWidth = Math.max(4 * scale, (plot.right - plot.left) / candles.length * 0.56);
+  const meta = [];
 
   candles.forEach((candle, index) => {
-    const x = pad + (index / Math.max(candles.length - 1, 1)) * (width - pad * 2);
-    const openY = yFor(candle.open);
-    const closeY = yFor(candle.close);
-    const highY = yFor(candle.high);
-    const lowY = yFor(candle.low);
+    const x = plot.left + (index / Math.max(candles.length - 1, 1)) * (plot.right - plot.left);
+    const openY = yScale.yFor(candle.open);
+    const closeY = yScale.yFor(candle.close);
+    const highY = yScale.yFor(candle.high);
+    const lowY = yScale.yFor(candle.low);
     const positive = candle.close >= candle.open;
     ctx.strokeStyle = positive ? "#147a54" : "#b33a3a";
     ctx.fillStyle = positive ? "rgba(20, 122, 84, 0.18)" : "rgba(179, 58, 58, 0.16)";
@@ -221,51 +350,45 @@ function drawCandles(canvas, candles) {
     ctx.stroke();
     ctx.fillRect(x - candleWidth / 2, Math.min(openY, closeY), candleWidth, Math.max(2 * scale, Math.abs(closeY - openY)));
     ctx.strokeRect(x - candleWidth / 2, Math.min(openY, closeY), candleWidth, Math.max(2 * scale, Math.abs(closeY - openY)));
+    meta.push({ x: x / scale, y: closeY / scale, item: candle });
   });
+  state.chartMeta.candle = meta;
 }
 
 function drawLineChart(canvas, rows) {
   if (!rows?.length) {
     drawEmptyChart(canvas, "Historical prices will appear after the next data snapshot.");
+    state.chartMeta.history = [];
     return;
   }
 
   const { ctx, scale, width, height } = setupCanvas(canvas);
-  const pad = 18 * scale;
   const values = rows.map((row) => row.close).filter(Number.isFinite);
-  const yFor = chartScale(values, height, pad);
+  const { plot, yScale } = drawAxes(ctx, scale, width, height, values, rows.map((row) => row.date), state.historyRange);
+  const meta = [];
 
-  ctx.strokeStyle = "#d9dfd5";
-  ctx.lineWidth = scale;
-  for (let index = 0; index < 4; index += 1) {
-    const y = pad + ((height - pad * 2) / 3) * index;
-    ctx.beginPath();
-    ctx.moveTo(pad, y);
-    ctx.lineTo(width - pad, y);
-    ctx.stroke();
-  }
-
-  const gradient = ctx.createLinearGradient(0, pad, 0, height - pad);
+  const gradient = ctx.createLinearGradient(0, plot.top, 0, plot.bottom);
   gradient.addColorStop(0, "rgba(35, 106, 150, 0.2)");
   gradient.addColorStop(1, "rgba(255, 255, 255, 0)");
 
   ctx.beginPath();
   rows.forEach((row, index) => {
-    const x = pad + (index / Math.max(rows.length - 1, 1)) * (width - pad * 2);
-    const y = yFor(row.close);
+    const x = plot.left + (index / Math.max(rows.length - 1, 1)) * (plot.right - plot.left);
+    const y = yScale.yFor(row.close);
     if (index === 0) ctx.moveTo(x, y);
     else ctx.lineTo(x, y);
+    meta.push({ x: x / scale, y: y / scale, item: row });
   });
-  ctx.lineTo(width - pad, height - pad);
-  ctx.lineTo(pad, height - pad);
+  ctx.lineTo(plot.right, plot.bottom);
+  ctx.lineTo(plot.left, plot.bottom);
   ctx.closePath();
   ctx.fillStyle = gradient;
   ctx.fill();
 
   ctx.beginPath();
   rows.forEach((row, index) => {
-    const x = pad + (index / Math.max(rows.length - 1, 1)) * (width - pad * 2);
-    const y = yFor(row.close);
+    const x = plot.left + (index / Math.max(rows.length - 1, 1)) * (plot.right - plot.left);
+    const y = yScale.yFor(row.close);
     if (index === 0) ctx.moveTo(x, y);
     else ctx.lineTo(x, y);
   });
@@ -273,6 +396,38 @@ function drawLineChart(canvas, rows) {
   ctx.lineWidth = 2.5 * scale;
   ctx.lineCap = "round";
   ctx.stroke();
+  state.chartMeta.history = meta;
+}
+
+function nearestChartPoint(kind, event) {
+  const canvas = kind === "candle" ? els.candleChart : els.historyChart;
+  const points = state.chartMeta[kind] || [];
+  if (!canvas || !points.length) return null;
+
+  const rect = canvas.getBoundingClientRect();
+  const x = event.clientX - rect.left;
+  return points.reduce((nearest, point) => {
+    const distance = Math.abs(point.x - x);
+    return !nearest || distance < nearest.distance ? { ...point, distance } : nearest;
+  }, null);
+}
+
+function updateChartReadout(kind, point) {
+  if (!point) return;
+
+  if (kind === "candle") {
+    const candle = point.item;
+    const labelMode = candle.time && !candle.date ? "dateTime" : "date";
+    els.candleReadout.textContent = `${formatChartTime(candle.time || candle.date, labelMode)} · Open ${shortPrice(candle.open)} · High ${shortPrice(candle.high)} · Low ${shortPrice(candle.low)} · Close ${shortPrice(candle.close)}`;
+    return;
+  }
+
+  const row = point.item;
+  els.historyReadout.textContent = `${formatChartTime(row.date)} · Close ${shortPrice(row.close)} · Open ${shortPrice(row.open)} · High ${shortPrice(row.high)} · Low ${shortPrice(row.low)} · Volume ${compact(row.volume)}`;
+}
+
+function handleChartPointer(kind, event) {
+  updateChartReadout(kind, nearestChartPoint(kind, event));
 }
 
 function renderSummary(stocks) {
@@ -492,10 +647,12 @@ function renderTechnicalWorkspace() {
     return;
   }
 
-  const candleLabels = {
-    fiveMinute: "5 minute",
-    fifteenMinute: "15 minute",
-    thirtyMinute: "30 minute"
+  const periodLabels = {
+    week: "1W",
+    threeMonth: "3M",
+    sixMonth: "6M",
+    oneYear: "1Y",
+    all: "All"
   };
   const historyLabels = {
     day: "Day",
@@ -506,11 +663,31 @@ function renderTechnicalWorkspace() {
     all: "All available"
   };
 
-  els.candleTitle.textContent = `${stock.symbol} · ${candleLabels[state.candleRange]}`;
+  const candleData = state.candleData[candleKey(stock.symbol)];
+  const effectiveLabel = candleData?.effectiveRange && candleData.effectiveRange !== "7d" && candleData.effectiveRange !== state.candlePeriod
+    ? `${candleData.effectiveRange} shown · ${periodLabels[state.candlePeriod]} requested`
+    : periodLabels[state.candlePeriod];
+  els.candleTitle.textContent = `${stock.symbol} · ${effectiveLabel} · ${state.candleInterval}`;
   els.historyTitle.textContent = `${stock.symbol} · ${historyLabels[state.historyRange]}`;
   els.statsTitle.textContent = `${money(stock.price)} ${stock.symbol}`;
-  drawCandles(els.candleChart, stock.candles?.[state.candleRange] || []);
+  if (!candleData) {
+    drawEmptyChart(els.candleChart, "Loading detailed candles...");
+    state.chartMeta.candle = [];
+    els.candleReadout.textContent = "Fetching candle data for the selected period and interval.";
+    loadDetailedCandles(stock.symbol);
+  } else {
+    drawCandles(els.candleChart, candleData.candles || [], state.candlePeriod, candleData.note);
+    if (state.chartMeta.candle.length) {
+      updateChartReadout("candle", state.chartMeta.candle.at(-1));
+    } else {
+      els.candleReadout.textContent = "No candles are available for this selection.";
+    }
+    if (candleData.note) {
+      els.candleReadout.textContent += ` · ${candleData.note}`;
+    }
+  }
   drawLineChart(els.historyChart, stock.history?.[state.historyRange] || []);
+  updateChartReadout("history", state.chartMeta.history.at(-1));
   renderStats(stock);
 }
 
@@ -637,11 +814,21 @@ els.technicalSymbol.addEventListener("change", (event) => {
   render();
 });
 
-document.querySelectorAll("[data-candle-range]").forEach((button) => {
+document.querySelectorAll("[data-candle-period]").forEach((button) => {
   button.addEventListener("click", () => {
-    state.candleRange = button.dataset.candleRange;
-    document.querySelectorAll("[data-candle-range]").forEach((item) => {
-      item.classList.toggle("active", item.dataset.candleRange === state.candleRange);
+    state.candlePeriod = button.dataset.candlePeriod;
+    document.querySelectorAll("[data-candle-period]").forEach((item) => {
+      item.classList.toggle("active", item.dataset.candlePeriod === state.candlePeriod);
+    });
+    renderTechnicalWorkspace();
+  });
+});
+
+document.querySelectorAll("[data-candle-interval]").forEach((button) => {
+  button.addEventListener("click", () => {
+    state.candleInterval = button.dataset.candleInterval;
+    document.querySelectorAll("[data-candle-interval]").forEach((item) => {
+      item.classList.toggle("active", item.dataset.candleInterval === state.candleInterval);
     });
     renderTechnicalWorkspace();
   });
@@ -655,6 +842,11 @@ document.querySelectorAll("[data-history-range]").forEach((button) => {
     });
     renderTechnicalWorkspace();
   });
+});
+
+["pointermove", "click"].forEach((eventName) => {
+  els.candleChart.addEventListener(eventName, (event) => handleChartPointer("candle", event));
+  els.historyChart.addEventListener(eventName, (event) => handleChartPointer("history", event));
 });
 
 els.refreshBtn.addEventListener("click", () => loadSnapshot(true));
