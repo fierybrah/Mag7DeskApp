@@ -742,7 +742,7 @@ function renderTechnicalWorkspace() {
   } else {
     const viewport = candleViewport(candleData.candles || []);
     const visibleCandles = viewport.candles;
-    drawCandles(els.candleChart, visibleCandles, state.candlePeriod, candleData.note);
+    drawCandles(els.candleChart, visibleCandles, state.candlePeriod, "No detailed candles are available for this selection.");
     updateCandleZoomControls(candleData.candles || []);
     if (state.chartMeta.candle.length) {
       updateChartReadout("candle", state.chartMeta.candle.at(-1));
