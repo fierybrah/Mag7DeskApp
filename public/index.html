@@ -127,6 +127,7 @@
               </div>
               <div class="chart-control-stack">
                 <div class="segmented wide" aria-label="Candlestick time period">
+                  <button class="mini-tab" data-candle-period="day" type="button">1D</button>
                   <button class="mini-tab active" data-candle-period="week" type="button">1W</button>
                   <button class="mini-tab" data-candle-period="threeMonth" type="button">3M</button>
                   <button class="mini-tab" data-candle-period="sixMonth" type="button">6M</button>
@@ -139,9 +140,11 @@
                   <button class="mini-tab" data-candle-interval="30m" type="button">30m</button>
                 </div>
                 <div class="chart-zoom" aria-label="Candlestick chart zoom controls">
+                  <button id="candlePanEarlier" type="button" aria-label="Show earlier candles" title="Show earlier candles" disabled>←</button>
                   <button id="candleZoomOut" type="button" aria-label="Zoom out" title="Zoom out" disabled>−</button>
                   <button id="candleZoomReset" type="button" aria-label="Reset chart zoom" title="Reset chart zoom" disabled>↺</button>
                   <button id="candleZoomIn" type="button" aria-label="Zoom in" title="Zoom in" disabled>+</button>
+                  <button id="candlePanLater" type="button" aria-label="Show later candles" title="Show later candles" disabled>→</button>
                 </div>
               </div>
             </div>

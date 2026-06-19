@@ -7,6 +7,7 @@ const state = {
   candlePeriod: "week",
   candleInterval: "5m",
   candleZoom: 1,
+  candlePan: 0,
   historyRange: "day",
   candleData: {},
   candleLoadingKey: null,
@@ -44,6 +45,8 @@ const els = {
   candleZoomIn: document.querySelector("#candleZoomIn"),
   candleZoomOut: document.querySelector("#candleZoomOut"),
   candleZoomReset: document.querySelector("#candleZoomReset"),
+  candlePanEarlier: document.querySelector("#candlePanEarlier"),
+  candlePanLater: document.querySelector("#candlePanLater"),
   historyChart: document.querySelector("#historyChart"),
   candleReadout: document.querySelector("#candleReadout"),
   historyReadout: document.querySelector("#historyReadout"),
@@ -359,28 +362,57 @@ function drawCandles(canvas, candles, range = "day", emptyMessage) {
   state.chartMeta.candle = meta;
 }
 
-function zoomedCandles(candles) {
-  if (!candles?.length || state.candleZoom <= 1) return candles || [];
+function candleViewport(candles) {
+  if (!candles?.length) return { candles: [], count: 0, pan: 0, maxPan: 0 };
   const count = Math.max(12, Math.ceil(candles.length / state.candleZoom));
-  return candles.slice(-count);
+  const maxPan = Math.max(0, candles.length - count);
+  const pan = Math.min(Math.max(state.candlePan, 0), maxPan);
+  state.candlePan = pan;
+  const end = candles.length - pan;
+  return {
+    candles: candles.slice(Math.max(0, end - count), end),
+    count,
+    pan,
+    maxPan
+  };
 }
 
 function updateCandleZoomControls(candles) {
   const maxZoom = candles?.length > 24 ? 16 : 1;
+  const viewport = candleViewport(candles);
   els.candleZoomIn.disabled = state.candleZoom >= maxZoom;
   els.candleZoomOut.disabled = state.candleZoom <= 1;
-  els.candleZoomReset.disabled = state.candleZoom <= 1;
+  els.candleZoomReset.disabled = state.candleZoom <= 1 && viewport.pan === 0;
+  els.candlePanEarlier.disabled = viewport.pan >= viewport.maxPan;
+  els.candlePanLater.disabled = viewport.pan <= 0;
 }
 
 function disableCandleZoomControls() {
   els.candleZoomIn.disabled = true;
   els.candleZoomOut.disabled = true;
   els.candleZoomReset.disabled = true;
+  els.candlePanEarlier.disabled = true;
+  els.candlePanLater.disabled = true;
 }
 
 function changeCandleZoom(direction) {
+  const stock = selectedTechnicalStock();
+  const candles = state.candleData[candleKey(stock?.symbol)]?.candles || [];
+  const current = candleViewport(candles);
+  const midpoint = candles.length - current.pan - current.count / 2;
   const nextZoom = direction === "in" ? state.candleZoom * 2 : state.candleZoom / 2;
   state.candleZoom = Math.max(1, Math.min(16, nextZoom));
+  const nextCount = Math.max(12, Math.ceil(candles.length / state.candleZoom));
+  state.candlePan = Math.max(0, Math.min(candles.length - nextCount, Math.round(candles.length - (midpoint + nextCount / 2))));
+  renderTechnicalWorkspace();
+}
+
+function changeCandlePan(direction) {
+  const stock = selectedTechnicalStock();
+  const candles = state.candleData[candleKey(stock?.symbol)]?.candles || [];
+  const viewport = candleViewport(candles);
+  const step = Math.max(1, Math.floor(viewport.count * 0.7));
+  state.candlePan = Math.max(0, Math.min(viewport.maxPan, viewport.pan + direction * step));
   renderTechnicalWorkspace();
 }
 
@@ -678,6 +710,7 @@ function renderTechnicalWorkspace() {
   }
 
   const periodLabels = {
+    day: "1D",
     week: "1W",
     threeMonth: "3M",
     sixMonth: "6M",
@@ -707,13 +740,16 @@ function renderTechnicalWorkspace() {
     els.candleReadout.textContent = "Fetching candle data for the selected period and interval.";
     loadDetailedCandles(stock.symbol);
   } else {
-    const visibleCandles = zoomedCandles(candleData.candles || []);
+    const viewport = candleViewport(candleData.candles || []);
+    const visibleCandles = viewport.candles;
     drawCandles(els.candleChart, visibleCandles, state.candlePeriod, candleData.note);
     updateCandleZoomControls(candleData.candles || []);
     if (state.chartMeta.candle.length) {
       updateChartReadout("candle", state.chartMeta.candle.at(-1));
-      if (state.candleZoom > 1) {
-        els.candleReadout.textContent += ` · ${state.candleZoom}x zoom: latest ${visibleCandles.length.toLocaleString()} candles shown.`;
+      if (state.candleZoom > 1 || viewport.pan > 0) {
+        const start = visibleCandles[0];
+        const end = visibleCandles.at(-1);
+        els.candleReadout.textContent += ` · ${state.candleZoom}x zoom: ${formatChartTime(start.time || start.date, "dateTime")} to ${formatChartTime(end.time || end.date, "dateTime")}.`;
       }
     } else {
       els.candleReadout.textContent = "No candles are available for this selection.";
@@ -848,6 +884,7 @@ els.signalFilter.addEventListener("change", (event) => {
 els.technicalSymbol.addEventListener("change", (event) => {
   state.technicalSymbol = event.target.value;
   state.candleZoom = 1;
+  state.candlePan = 0;
   render();
 });
 
@@ -855,6 +892,7 @@ document.querySelectorAll("[data-candle-period]").forEach((button) => {
   button.addEventListener("click", () => {
     state.candlePeriod = button.dataset.candlePeriod;
     state.candleZoom = 1;
+    state.candlePan = 0;
     document.querySelectorAll("[data-candle-period]").forEach((item) => {
       item.classList.toggle("active", item.dataset.candlePeriod === state.candlePeriod);
     });
@@ -866,6 +904,7 @@ document.querySelectorAll("[data-candle-interval]").forEach((button) => {
   button.addEventListener("click", () => {
     state.candleInterval = button.dataset.candleInterval;
     state.candleZoom = 1;
+    state.candlePan = 0;
     document.querySelectorAll("[data-candle-interval]").forEach((item) => {
       item.classList.toggle("active", item.dataset.candleInterval === state.candleInterval);
     });
@@ -877,8 +916,11 @@ els.candleZoomIn.addEventListener("click", () => changeCandleZoom("in"));
 els.candleZoomOut.addEventListener("click", () => changeCandleZoom("out"));
 els.candleZoomReset.addEventListener("click", () => {
   state.candleZoom = 1;
+  state.candlePan = 0;
   renderTechnicalWorkspace();
 });
+els.candlePanEarlier.addEventListener("click", () => changeCandlePan(1));
+els.candlePanLater.addEventListener("click", () => changeCandlePan(-1));
 
 document.querySelectorAll("[data-history-range]").forEach((button) => {
   button.addEventListener("click", () => {
