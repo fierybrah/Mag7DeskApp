@@ -402,6 +402,94 @@ function alpacaTimeframe(interval) {
   }[interval];
 }
 
+function marketDate(date = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).formatToParts(date);
+  const value = (type) => parts.find((part) => part.type === type)?.value;
+  return `${value("year")}-${value("month")}-${value("day")}`;
+}
+
+function marketDayStart(date) {
+  return `${date}T00:00:00Z`;
+}
+
+function observedFixedHoliday(year, month, day) {
+  const date = new Date(Date.UTC(year, month - 1, day));
+  const weekday = date.getUTCDay();
+  if (weekday === 6) date.setUTCDate(date.getUTCDate() - 1);
+  if (weekday === 0) date.setUTCDate(date.getUTCDate() + 1);
+  return date.toISOString().slice(0, 10);
+}
+
+function nthWeekdayOfMonth(year, month, weekday, occurrence) {
+  const date = new Date(Date.UTC(year, month - 1, 1));
+  const offset = (weekday - date.getUTCDay() + 7) % 7;
+  date.setUTCDate(1 + offset + (occurrence - 1) * 7);
+  return date.toISOString().slice(0, 10);
+}
+
+function lastWeekdayOfMonth(year, month, weekday) {
+  const date = new Date(Date.UTC(year, month, 0));
+  const offset = (date.getUTCDay() - weekday + 7) % 7;
+  date.setUTCDate(date.getUTCDate() - offset);
+  return date.toISOString().slice(0, 10);
+}
+
+function goodFriday(year) {
+  const a = year % 19;
+  const b = Math.floor(year / 100);
+  const c = year % 100;
+  const d = Math.floor(b / 4);
+  const e = b % 4;
+  const f = Math.floor((b + 8) / 25);
+  const g = Math.floor((b - f + 1) / 3);
+  const h = (19 * a + b - d - g + 15) % 30;
+  const i = Math.floor(c / 4);
+  const k = c % 4;
+  const l = (32 + 2 * e + 2 * i - h - k) % 7;
+  const m = Math.floor((a + 11 * h + 22 * l) / 451);
+  const easter = new Date(Date.UTC(year, Math.floor((h + l - 7 * m + 114) / 31) - 1, (h + l - 7 * m + 114) % 31 + 1));
+  easter.setUTCDate(easter.getUTCDate() - 2);
+  return easter.toISOString().slice(0, 10);
+}
+
+function marketClosureReason(date) {
+  const value = new Date(`${date}T12:00:00Z`);
+  const weekday = value.getUTCDay();
+  if (weekday === 0 || weekday === 6) return "weekend market closure";
+
+  const year = value.getUTCFullYear();
+  const holidays = new Map([
+    [observedFixedHoliday(year, 1, 1), "New Year's Day"],
+    [nthWeekdayOfMonth(year, 1, 1, 3), "Martin Luther King Jr. Day"],
+    [nthWeekdayOfMonth(year, 2, 1, 3), "Presidents Day"],
+    [goodFriday(year), "Good Friday"],
+    [lastWeekdayOfMonth(year, 5, 1), "Memorial Day"],
+    [observedFixedHoliday(year, 6, 19), "Juneteenth National Independence Day"],
+    [observedFixedHoliday(year, 7, 4), "Independence Day"],
+    [nthWeekdayOfMonth(year, 9, 1, 1), "Labor Day"],
+    [nthWeekdayOfMonth(year, 11, 4, 4), "Thanksgiving Day"],
+    [observedFixedHoliday(year, 12, 25), "Christmas Day"]
+  ]);
+  return holidays.get(date) || "the NYSE calendar marks this day closed";
+}
+
+async function fetchPreviousTradingDay(today) {
+  const start = new Date(`${today}T12:00:00Z`);
+  start.setUTCDate(start.getUTCDate() - 14);
+  const params = new URLSearchParams({
+    start: start.toISOString().slice(0, 10),
+    end: today,
+    date_type: "TRADING"
+  });
+  const days = await fetchAlpacaJson(`https://paper-api.alpaca.markets/v2/calendar?${params}`);
+  return days.at(-1)?.date || null;
+}
+
 function candleLimitNote(period, interval) {
   if (period === "day" || period === "week") return "";
   return `The requested ${periodLabel(period)} view is limited to the most recent 60 days for ${interval} candles by the public market data provider.`;
@@ -463,7 +551,8 @@ function compactCandles(candles, maxPoints = 1600) {
 }
 
 async function fetchAlpacaCandles(symbol, period, interval) {
-  const start = alpacaStartForPeriod(period);
+  const today = marketDate();
+  const start = period === "day" ? marketDayStart(today) : alpacaStartForPeriod(period);
   const end = new Date().toISOString();
   const timeframe = alpacaTimeframe(interval);
   const params = new URLSearchParams({
@@ -486,6 +575,34 @@ async function fetchAlpacaCandles(symbol, period, interval) {
     pageToken = payload?.next_page_token;
     pagesFetched += 1;
   } while (pageToken && pagesFetched < MAX_ALPACA_PAGES);
+
+  if (!candles.length && period === "day") {
+    const previousDay = await fetchPreviousTradingDay(today);
+    if (previousDay && previousDay !== today) {
+      const previousParams = new URLSearchParams({
+        timeframe,
+        start: marketDayStart(previousDay),
+        end: `${previousDay}T23:59:59Z`,
+        adjustment: "all",
+        feed: "iex",
+        limit: "10000",
+        sort: "asc"
+      });
+      const previousPayload = await fetchAlpacaJson(`https://data.alpaca.markets/v2/stocks/${symbol}/bars?${previousParams}`);
+      candles.push(...parseAlpacaCandles(previousPayload));
+      if (candles.length) {
+        return {
+          symbol,
+          period,
+          interval,
+          effectiveRange: "previousTradingDay",
+          source: "Alpaca Market Data",
+          note: `Market closed on ${today}: ${marketClosureReason(today)}. Showing the previous trading session, ${previousDay}.`,
+          candles
+        };
+      }
+    }
+  }
 
   if (!candles.length) throw new Error("Alpaca returned no bars for this selection");
 
