@@ -7,6 +7,9 @@ const PORT = Number(process.env.PORT || 3000);
 const REFRESH_MS = Number(process.env.REFRESH_MS || 60 * 1000);
 const NEWS_REFRESH_MS = Number(process.env.NEWS_REFRESH_MS || 10 * 60 * 1000);
 const FETCH_TIMEOUT_MS = Number(process.env.FETCH_TIMEOUT_MS || 12000);
+const ALPACA_API_KEY = process.env.ALPACA_API_KEY;
+const ALPACA_API_SECRET = process.env.ALPACA_API_SECRET;
+const MAX_ALPACA_PAGES = 25;
 const PUBLIC_DIR = path.join(__dirname, "public");
 
 const STOCKS = [
@@ -27,6 +30,7 @@ const state = {
   nextRefresh: null,
   nextNewsRefresh: null,
   errors: [],
+  candleCache: new Map(),
   stocks: [],
   news: []
 };
@@ -129,6 +133,111 @@ async function timedFetchText(url, accept) {
 async function fetchJson(url) {
   const text = await timedFetchText(url, "application/json,text/plain,*/*");
   return JSON.parse(text);
+}
+
+async function fetchYahooJson(url) {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    let request;
+    const finish = (error, body) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(overallTimeout);
+      if (error) reject(error);
+      else {
+        try {
+          resolve(JSON.parse(body));
+        } catch (parseError) {
+          reject(parseError);
+        }
+      }
+    };
+    const overallTimeout = setTimeout(() => {
+      if (request) request.destroy();
+      finish(new Error(`Request timed out after ${FETCH_TIMEOUT_MS}ms`));
+    }, FETCH_TIMEOUT_MS);
+
+    request = https.request(new URL(url), {
+      method: "GET",
+      timeout: FETCH_TIMEOUT_MS,
+      headers: {
+        "accept": "application/json,text/plain,*/*",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125 Safari/537.36"
+      }
+    }, (response) => {
+      const chunks = [];
+      response.on("data", (chunk) => chunks.push(chunk));
+      response.on("end", () => {
+        const body = Buffer.concat(chunks).toString("utf8");
+        if (response.statusCode < 200 || response.statusCode >= 300) {
+          finish(new Error(`${response.statusCode} ${response.statusMessage}`));
+          return;
+        }
+        finish(null, body);
+      });
+    });
+
+    request.on("timeout", () => {
+      request.destroy(new Error(`Request timed out after ${FETCH_TIMEOUT_MS}ms`));
+    });
+    request.on("error", finish);
+    request.end();
+  });
+}
+
+async function fetchAlpacaJson(url) {
+  if (!ALPACA_API_KEY || !ALPACA_API_SECRET) {
+    throw new Error("Alpaca credentials are not configured on this server");
+  }
+
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    let request;
+    const finish = (error, body) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(overallTimeout);
+      if (error) reject(error);
+      else {
+        try {
+          resolve(JSON.parse(body));
+        } catch (parseError) {
+          reject(parseError);
+        }
+      }
+    };
+    const overallTimeout = setTimeout(() => {
+      if (request) request.destroy();
+      finish(new Error(`Alpaca request timed out after ${FETCH_TIMEOUT_MS}ms`));
+    }, FETCH_TIMEOUT_MS);
+
+    request = https.request(new URL(url), {
+      method: "GET",
+      timeout: FETCH_TIMEOUT_MS,
+      headers: {
+        "accept": "application/json",
+        "APCA-API-KEY-ID": ALPACA_API_KEY,
+        "APCA-API-SECRET-KEY": ALPACA_API_SECRET
+      }
+    }, (response) => {
+      const chunks = [];
+      response.on("data", (chunk) => chunks.push(chunk));
+      response.on("end", () => {
+        const body = Buffer.concat(chunks).toString("utf8");
+        if (response.statusCode < 200 || response.statusCode >= 300) {
+          finish(new Error(`Alpaca ${response.statusCode} ${response.statusMessage}`));
+          return;
+        }
+        finish(null, body);
+      });
+    });
+
+    request.on("timeout", () => {
+      request.destroy(new Error(`Alpaca request timed out after ${FETCH_TIMEOUT_MS}ms`));
+    });
+    request.on("error", finish);
+    request.end();
+  });
 }
 
 async function fetchText(url) {
@@ -258,6 +367,189 @@ function buildHistoricalRanges(historyRows) {
     sixMonth: take(126),
     oneYear: take(252),
     all: compactHistory(historyRows)
+  };
+}
+
+function yahooRangeForPeriod(period) {
+  const ranges = {
+    week: "7d",
+    threeMonth: "60d",
+    sixMonth: "60d",
+    oneYear: "60d",
+    all: "60d"
+  };
+  return ranges[period] || "7d";
+}
+
+function alpacaStartForPeriod(period) {
+  const days = {
+    week: 7,
+    threeMonth: 92,
+    sixMonth: 184,
+    oneYear: 366,
+    all: 3650
+  }[period] || 7;
+  return new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+}
+
+function alpacaTimeframe(interval) {
+  return {
+    "5m": "5Min",
+    "15m": "15Min",
+    "30m": "30Min"
+  }[interval];
+}
+
+function candleLimitNote(period, interval) {
+  if (period === "week") return "";
+  return `The requested ${periodLabel(period)} view is limited to the most recent 60 days for ${interval} candles by the public market data provider.`;
+}
+
+function periodLabel(period) {
+  return {
+    week: "1 week",
+    threeMonth: "3 months",
+    sixMonth: "6 months",
+    oneYear: "1 year",
+    all: "all time"
+  }[period] || period;
+}
+
+function parseYahooCandles(payload) {
+  const result = payload?.chart?.result?.[0];
+  const timestamps = result?.timestamp || [];
+  const quote = result?.indicators?.quote?.[0] || {};
+
+  return timestamps.map((timestamp, index) => ({
+    time: new Date(timestamp * 1000).toISOString(),
+    open: formatNumber(parseNumber(quote.open?.[index])),
+    high: formatNumber(parseNumber(quote.high?.[index])),
+    low: formatNumber(parseNumber(quote.low?.[index])),
+    close: formatNumber(parseNumber(quote.close?.[index])),
+    volume: parseNumber(quote.volume?.[index])
+  })).filter((row) => [row.open, row.high, row.low, row.close].every(Number.isFinite));
+}
+
+function parseAlpacaCandles(payload) {
+  return (payload?.bars || []).map((bar) => ({
+    time: bar.t,
+    open: formatNumber(bar.o),
+    high: formatNumber(bar.h),
+    low: formatNumber(bar.l),
+    close: formatNumber(bar.c),
+    volume: parseNumber(bar.v)
+  })).filter((row) => [row.open, row.high, row.low, row.close].every(Number.isFinite));
+}
+
+function compactCandles(candles, maxPoints = 1600) {
+  if (candles.length <= maxPoints) return candles;
+  const groupSize = Math.ceil(candles.length / maxPoints);
+  const compacted = [];
+  for (let index = 0; index < candles.length; index += groupSize) {
+    const group = candles.slice(index, index + groupSize);
+    compacted.push({
+      time: group[0].time,
+      open: group[0].open,
+      high: Math.max(...group.map((candle) => candle.high)),
+      low: Math.min(...group.map((candle) => candle.low)),
+      close: group.at(-1).close,
+      volume: group.reduce((total, candle) => total + (candle.volume || 0), 0)
+    });
+  }
+  return compacted;
+}
+
+async function fetchAlpacaCandles(symbol, period, interval) {
+  const start = alpacaStartForPeriod(period);
+  const end = new Date().toISOString();
+  const timeframe = alpacaTimeframe(interval);
+  const params = new URLSearchParams({
+    timeframe,
+    start,
+    end,
+    adjustment: "all",
+    feed: "iex",
+    limit: "10000",
+    sort: "asc"
+  });
+  const candles = [];
+  let pageToken;
+  let pagesFetched = 0;
+
+  do {
+    if (pageToken) params.set("page_token", pageToken);
+    const payload = await fetchAlpacaJson(`https://data.alpaca.markets/v2/stocks/${symbol}/bars?${params}`);
+    candles.push(...parseAlpacaCandles(payload));
+    pageToken = payload?.next_page_token;
+    pagesFetched += 1;
+  } while (pageToken && pagesFetched < MAX_ALPACA_PAGES);
+
+  if (!candles.length) throw new Error("Alpaca returned no bars for this selection");
+
+  const displayCandles = compactCandles(candles);
+  const compacted = displayCandles.length !== candles.length;
+  const notes = [];
+  if (compacted) notes.push(`Displaying ${displayCandles.length.toLocaleString()} visual candles aggregated from ${candles.length.toLocaleString()} ${interval} bars.`);
+  if (pageToken) notes.push(`The ${periodLabel(period)} request reached the ${MAX_ALPACA_PAGES}-page safety limit; choose a shorter period for every available bar.`);
+  return {
+    symbol,
+    period,
+    interval,
+    effectiveRange: period,
+    source: "Alpaca Market Data",
+    note: notes.join(" "),
+    candles: displayCandles
+  };
+}
+
+async function fetchDetailedCandles(symbol, period, interval) {
+  const stock = STOCKS.find((item) => item.symbol === symbol);
+  if (!stock) throw new Error("Unsupported symbol");
+  if (!["week", "threeMonth", "sixMonth", "oneYear", "all"].includes(period)) throw new Error("Unsupported period");
+  if (!["5m", "15m", "30m"].includes(interval)) throw new Error("Unsupported interval");
+
+  const range = yahooRangeForPeriod(period);
+  const provider = ALPACA_API_KEY && ALPACA_API_SECRET ? "alpaca" : "yahoo";
+  const cacheKey = `${provider}:${symbol}:${period}:${interval}:${range}`;
+  const cached = state.candleCache.get(cacheKey);
+  // Keep each request briefly cached so changing chart controls does not trip the free provider's rate limit.
+  if (cached && Date.now() - cached.cachedAt < 5 * 60 * 1000) {
+    return cached.payload;
+  }
+
+  const response = provider === "alpaca"
+    ? await fetchAlpacaCandles(symbol, period, interval)
+    : await (async () => {
+      const url = `https://query2.finance.yahoo.com/v8/finance/chart/${symbol}?range=${range}&interval=${interval}&includePrePost=false`;
+      const payload = await fetchYahooJson(url);
+      const providerError = payload?.chart?.error?.description;
+      if (providerError) throw new Error(providerError);
+      return {
+        symbol,
+        period,
+        interval,
+        effectiveRange: range,
+        source: "Yahoo Finance",
+        note: candleLimitNote(period, interval),
+        candles: parseYahooCandles(payload)
+      };
+    })();
+  state.candleCache.set(cacheKey, { cachedAt: Date.now(), payload: response });
+  return response;
+}
+
+function fallbackDetailedCandles(symbol, period, interval, reason) {
+  const alpacaConfigured = Boolean(ALPACA_API_KEY && ALPACA_API_SECRET);
+  const setupNote = alpacaConfigured
+    ? "Alpaca could not return this selection right now."
+    : "This local server does not have the Alpaca environment variables; it is using the public fallback source instead. The Render deployment will use Alpaca after the updated code is deployed.";
+  return {
+    symbol,
+    period,
+    interval,
+    effectiveRange: null,
+    note: `${periodLabel(period)} ${interval} candles are temporarily unavailable (${reason}). ${setupNote} The chart is left empty rather than showing data from a different time period.`,
+    candles: []
   };
 }
 
@@ -549,7 +841,9 @@ function serializableState() {
 
 const server = http.createServer(async (req, res) => {
   try {
-    if (req.url === "/health") {
+    const requestUrl = new URL(req.url, `http://${req.headers.host || "localhost"}`);
+
+    if (requestUrl.pathname === "/health") {
       json(res, 200, {
         ok: true,
         loading: state.loading,
@@ -558,7 +852,7 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
-    if (req.url === "/api/snapshot") {
+    if (requestUrl.pathname === "/api/snapshot") {
       if (!state.lastUpdated && !state.loading) {
         collectSnapshot().catch((error) => state.errors.push(error.message));
       }
@@ -566,7 +860,19 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
-    if (req.url === "/api/refresh" && req.method === "POST") {
+    if (requestUrl.pathname === "/api/candles") {
+      const symbol = String(requestUrl.searchParams.get("symbol") || "").toUpperCase();
+      const period = requestUrl.searchParams.get("period") || "week";
+      const interval = requestUrl.searchParams.get("interval") || "5m";
+      try {
+        json(res, 200, await fetchDetailedCandles(symbol, period, interval));
+      } catch (error) {
+        json(res, 200, fallbackDetailedCandles(symbol, period, interval, error.message));
+      }
+      return;
+    }
+
+    if (requestUrl.pathname === "/api/refresh" && req.method === "POST") {
       await collectSnapshot();
       await collectNews(true);
       json(res, 200, serializableState());
