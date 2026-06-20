@@ -25,7 +25,7 @@ const els = {
   nextRefresh: document.querySelector("#nextRefresh"),
   marketPulse: document.querySelector("#marketPulse"),
   priceStrip: document.querySelector("#priceStrip"),
-  stockGrid: document.querySelector("#stockGrid"),
+  selectedSignalHint: document.querySelector("#selectedSignalHint"),
   candleTitle: document.querySelector("#candleTitle"),
   historyTitle: document.querySelector("#historyTitle"),
   candleChart: document.querySelector("#candleChart"),
@@ -478,43 +478,22 @@ function renderBrief(stocks) {
     : "Waiting for the latest market breadth snapshot.";
 }
 
-function stockCard(stock) {
-  const changeClass = stock.changePercent >= 0 ? "up" : "down";
+function signalRationale(stock) {
   const signal = stock.technicals?.signal || "Unavailable";
   const price = stock.price;
   const sma20 = stock.technicals?.sma20;
   const sma50 = stock.technicals?.sma50;
-  const signalReason = signal === "Bullish"
-    ? "Above 20D / 50D SMA"
-    : signal === "Bearish"
-      ? "Below 20D / 50D SMA"
-      : Number.isFinite(price) && Number.isFinite(sma20) && Number.isFinite(sma50)
-        ? "Mixed 20D / 50D SMA"
-        : "SMA trend unavailable";
-
-  return `
-    <article class="stock-card ${stock.symbol === state.technicalSymbol ? "active" : ""}" data-stock-select="${stock.symbol}" role="button" tabindex="0" aria-pressed="${stock.symbol === state.technicalSymbol}">
-      <div class="card-head">
-        <div>
-          <div class="symbol">${stock.symbol}</div>
-          <div class="company">${stock.name}</div>
-        </div>
-        <div class="signal-summary"><span class="signal ${signal}">${signal}</span><span class="signal-reason">${signalReason}</span></div>
-      </div>
-      <div>
-        <div class="price">${money(stock.price)}</div>
-        <div class="move ${changeClass}">${money(stock.change)} ${percent(stock.changePercent)}</div>
-      </div>
-      <canvas class="spark" data-symbol="${stock.symbol}" aria-label="${stock.symbol} price trend"></canvas>
-    </article>
-  `;
+  if (signal === "Bullish") return "above 20D and 50D SMA";
+  if (signal === "Bearish") return "below 20D and 50D SMA";
+  if (Number.isFinite(price) && Number.isFinite(sma20) && Number.isFinite(sma50)) return "mixed 20D and 50D SMA";
+  return "SMA trend unavailable";
 }
 
 function renderPriceStrip(stocks) {
   els.priceStrip.innerHTML = stocks.map((stock) => {
     const selected = stock.symbol === state.technicalSymbol;
     const direction = stock.changePercent >= 0 ? "up" : "down";
-    return `<button class="price-strip-item ${selected ? "active" : ""}" data-stock-select="${stock.symbol}" type="button" aria-pressed="${selected}"><span>${stock.symbol}</span><strong>${money(stock.price)}</strong><b class="${direction}">${percent(stock.changePercent)}</b></button>`;
+    return `<button class="price-strip-item ${selected ? "active" : ""}" data-stock-select="${stock.symbol}" type="button" aria-pressed="${selected}" aria-label="Select ${stock.name}"><span>${stock.symbol}</span><strong>${money(stock.price)}</strong><b class="${direction}">${percent(stock.changePercent)}</b></button>`;
   }).join("");
   els.priceStrip.querySelectorAll("[data-stock-select]").forEach((element) => {
     element.addEventListener("click", () => selectStock(element.dataset.stockSelect));
@@ -526,32 +505,11 @@ function selectStock(symbol, scrollToDetail = true) {
   state.technicalSymbol = symbol;
   state.candleZoom = 1;
   state.candlePan = 0;
-  renderOverview(filteredStocks());
   renderPriceStrip(filteredStocks());
   renderTechnicalWorkspace();
   if (scrollToDetail) {
     window.requestAnimationFrame(() => document.querySelector("#stockDetail")?.scrollIntoView({ behavior: "smooth", block: "start" }));
   }
-}
-
-function renderOverview(stocks) {
-  els.stockGrid.innerHTML = stocks.length
-    ? stocks.map(stockCard).join("")
-    : `<div class="empty">No stocks match the current filters.</div>`;
-
-  stocks.forEach((stock) => {
-    const canvas = els.stockGrid.querySelector(`canvas[data-symbol="${stock.symbol}"]`);
-    if (canvas) drawSparkline(canvas, stock.series || [], stock.changePercent >= 0);
-  });
-  document.querySelectorAll("[data-stock-select]").forEach((element) => {
-    element.addEventListener("click", () => selectStock(element.dataset.stockSelect));
-    element.addEventListener("keydown", (event) => {
-      if (event.key === "Enter" || event.key === " ") {
-        event.preventDefault();
-        selectStock(element.dataset.stockSelect);
-      }
-    });
-  });
 }
 
 function selectedTechnicalStock() {
@@ -738,6 +696,7 @@ function renderTechnicalWorkspace() {
     disableCandleZoomControls();
     drawEmptyChart(els.historyChart, "Waiting for historical data.");
     renderCandleAnalysis(null);
+    els.selectedSignalHint.textContent = "Select a stock from the live-price strip above.";
     return;
   }
 
@@ -764,6 +723,7 @@ function renderTechnicalWorkspace() {
     : periodLabels[state.candlePeriod];
   els.candleTitle.textContent = `${stock.symbol} · ${effectiveLabel} · ${state.candleInterval}`;
   els.historyTitle.textContent = `${stock.symbol} · ${historyLabels[state.historyRange]}`;
+  els.selectedSignalHint.textContent = `${stock.symbol} · ${stock.technicals?.signal || "Unavailable"} (${signalRationale(stock)})`;
   if (!candleData) {
     drawEmptyChart(els.candleChart, "Loading detailed candles...");
     state.chartMeta.candle = [];
@@ -839,7 +799,6 @@ function render() {
   renderSummary(state.data?.stocks || []);
   renderBrief(state.data?.stocks || []);
   renderErrors();
-  renderOverview(stocks);
   renderPriceStrip(stocks);
   renderTechnicalWorkspace();
   renderNews();
@@ -945,7 +904,6 @@ els.candleChart.addEventListener("wheel", (event) => {
 
 els.refreshBtn.addEventListener("click", () => loadSnapshot(true));
 window.addEventListener("resize", () => {
-  renderOverview(filteredStocks());
   renderTechnicalWorkspace();
 });
 
