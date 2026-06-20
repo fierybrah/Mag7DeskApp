@@ -18,8 +18,7 @@
         <span>Stock Desk</span>
       </a>
       <nav class="site-links" aria-label="Site sections">
-        <a href="#dashboard" data-nav-view="overview">Dashboard</a>
-        <a href="#signals" data-nav-view="technicals">Signals</a>
+        <a href="#dashboard" data-nav-view="market">Market</a>
         <a href="#headlines" data-nav-view="news">Headlines</a>
       </nav>
     </header>
@@ -41,36 +40,20 @@
 
       <section id="dashboard" class="section-head">
         <div>
-          <p class="eyebrow">Live dashboard</p>
-          <h2>Prices, ranges, and volume</h2>
+          <p class="eyebrow">Live market workspace</p>
+          <h2>Prices, signals, and technical detail</h2>
         </div>
         <p id="dataSource">Sources: Nasdaq market data and Alpaca chart data</p>
       </section>
 
       <nav class="tabs" aria-label="Dashboard views">
-        <button class="tab active" data-view="overview" type="button">Overview</button>
-        <button class="tab" data-view="technicals" type="button">Technicals</button>
+        <button class="tab active" data-view="market" type="button">Market</button>
         <button class="tab" data-view="news" type="button">News</button>
       </nav>
 
-      <div id="toolbarHome"></div>
-      <section class="toolbar" aria-label="Filters">
-        <div class="search-wrap">
-          <span aria-hidden="true">⌕</span>
-          <input id="searchInput" type="search" placeholder="Search symbol, company, sector">
-        </div>
-        <select id="signalFilter" aria-label="Technical signal filter">
-          <option value="all">All signals</option>
-          <option value="Bullish">Bullish</option>
-          <option value="Neutral">Neutral</option>
-          <option value="Bearish">Bearish</option>
-          <option value="Unavailable">Unavailable</option>
-        </select>
-      </section>
-
       <section id="errorPanel" class="error-panel hidden" aria-live="polite"></section>
 
-      <section id="overviewView" class="view active">
+      <section id="marketView" class="view active">
         <section class="summary-grid" aria-label="Market summary">
           <div class="metric">
             <span>Combined Market Cap</span>
@@ -90,6 +73,7 @@
           </div>
         </section>
         <div id="leaderStrip" class="leader-strip" aria-label="Market leaders"></div>
+        <div id="priceStrip" class="price-strip" aria-label="Live Mag 7 prices"></div>
         <div id="stockGrid" class="stock-grid" aria-live="polite"></div>
         <section class="story-grid" aria-label="Market brief">
           <article class="brief-panel">
@@ -108,15 +92,13 @@
             <p id="signalMixDetail">SMA and RSI readings update with each live refresh.</p>
           </article>
         </section>
-      </section>
-
-      <section id="technicalsView" class="view">
+        <section id="stockDetail" class="stock-detail" aria-label="Selected stock details">
         <div id="signals" class="section-head compact-head">
           <div>
-            <p class="eyebrow">Signal board</p>
-            <h2>Technical posture</h2>
+            <p class="eyebrow">Selected stock</p>
+            <h2>Full market and technical detail</h2>
           </div>
-          <select id="technicalSymbol" aria-label="Technical stock selector"></select>
+          <p class="detail-hint">Choose any stock card above to update this workspace.</p>
         </div>
         <section class="technical-workspace" aria-label="Selected stock technical charts and stats">
           <article class="chart-panel">
@@ -206,6 +188,7 @@
             <tbody id="technicalRows"></tbody>
           </table>
         </div>
+        </section>
       </section>
 
       <section id="newsView" class="view">
