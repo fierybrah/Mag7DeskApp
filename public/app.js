@@ -28,6 +28,7 @@ const els = {
   selectedSignalHint: document.querySelector("#selectedSignalHint"),
   candleTitle: document.querySelector("#candleTitle"),
   historyTitle: document.querySelector("#historyTitle"),
+  statsTitle: document.querySelector("#statsTitle"),
   candleChart: document.querySelector("#candleChart"),
   candleZoomIn: document.querySelector("#candleZoomIn"),
   candleZoomOut: document.querySelector("#candleZoomOut"),
@@ -38,6 +39,8 @@ const els = {
   candleReadout: document.querySelector("#candleReadout"),
   candleAnalysis: document.querySelector("#candleAnalysis"),
   historyReadout: document.querySelector("#historyReadout"),
+  profileGrid: document.querySelector("#profileGrid"),
+  statsGrid: document.querySelector("#statsGrid"),
   newsList: document.querySelector("#newsList"),
   errorPanel: document.querySelector("#errorPanel"),
 };
@@ -67,6 +70,11 @@ function percent(value) {
 function number(value) {
   if (!Number.isFinite(value)) return "--";
   return new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 }).format(value);
+}
+
+function plainNumber(value) {
+  if (!Number.isFinite(value)) return "--";
+  return new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 }).format(value);
 }
 
 function dateTime(value) {
@@ -517,6 +525,56 @@ function selectedTechnicalStock() {
   return stocks.find((stock) => stock.symbol === state.technicalSymbol) || stocks[0] || null;
 }
 
+function renderStats(stock) {
+  if (!stock) {
+    els.profileGrid.innerHTML = "";
+    els.statsGrid.innerHTML = `<div class="empty">Select a stock to view technical stats.</div>`;
+    return;
+  }
+
+  const profile = [
+    ["CEO", stock.ceo || "--"],
+    ["Founded", stock.founded || "--"],
+    ["Employees", plainNumber(stock.employees)],
+    ["Headquarters", stock.headquarters || "--"]
+  ];
+  const signal = stock.technicals?.signal || "Unavailable";
+  const stats = [
+    ["Bid", money(stock.stats?.bid ?? stock.bid)],
+    ["Ask", money(stock.stats?.ask ?? stock.ask)],
+    ["Volume", compact(stock.stats?.volume ?? stock.volume)],
+    ["Average vol", compact(stock.stats?.averageVolume ?? stock.averageVolume)],
+    ["Open", money(stock.stats?.open ?? stock.open)],
+    ["Today’s high", money(stock.stats?.dayHigh ?? stock.dayHigh)],
+    ["Today’s low", money(stock.stats?.dayLow ?? stock.dayLow)],
+    ["Market cap", compact(stock.stats?.marketCap ?? stock.marketCap)],
+    ["52-week high", money(stock.stats?.fiftyTwoWeekHigh ?? stock.fiftyTwoWeekHigh)],
+    ["52-week low", money(stock.stats?.fiftyTwoWeekLow ?? stock.fiftyTwoWeekLow)],
+    ["P/E ratio", number(stock.stats?.pe ?? stock.pe)],
+    ["EPS", money(stock.stats?.eps ?? stock.eps)],
+    ["Dividend yield", Number.isFinite(stock.stats?.dividendYield ?? stock.dividendYield) ? `${number(stock.stats?.dividendYield ?? stock.dividendYield)}%` : "--"],
+    ["Previous close", money(stock.stats?.previousClose ?? stock.previousClose)],
+    ["SMA 20", money(stock.technicals?.sma20)],
+    ["SMA 50", money(stock.technicals?.sma50)],
+    ["RSI 14", number(stock.technicals?.rsi14)],
+    ["Volume ratio", Number.isFinite(stock.technicals?.volumeRatio) ? `${number(stock.technicals.volumeRatio)}x` : "--"],
+    ["Signal", `${signal} (${signalRationale(stock)})`]
+  ];
+
+  els.profileGrid.innerHTML = profile.map(([label, value]) => `
+    <div class="profile-stat">
+      <span>${label}</span>
+      <strong>${value}</strong>
+    </div>
+  `).join("");
+  els.statsGrid.innerHTML = stats.map(([label, value]) => `
+    <div class="stat-cell">
+      <span>${label}</span>
+      <strong>${value}</strong>
+    </div>
+  `).join("");
+}
+
 function analyseCandlestickPattern(candles) {
   const valid = (candles || []).filter((candle) => [candle.open, candle.high, candle.low, candle.close].every(Number.isFinite));
   if (valid.length < 8) {
@@ -695,6 +753,7 @@ function renderTechnicalWorkspace() {
     drawEmptyChart(els.candleChart, "Waiting for market data.");
     disableCandleZoomControls();
     drawEmptyChart(els.historyChart, "Waiting for historical data.");
+    renderStats(null);
     renderCandleAnalysis(null);
     els.selectedSignalHint.textContent = "Select a stock from the live-price strip above.";
     return;
@@ -724,6 +783,7 @@ function renderTechnicalWorkspace() {
   els.candleTitle.textContent = `${stock.symbol} · ${effectiveLabel} · ${state.candleInterval}`;
   els.historyTitle.textContent = `${stock.symbol} · ${historyLabels[state.historyRange]}`;
   els.selectedSignalHint.textContent = `${stock.symbol} · ${stock.technicals?.signal || "Unavailable"} (${signalRationale(stock)})`;
+  els.statsTitle.textContent = `${money(stock.price)} ${stock.symbol}`;
   if (!candleData) {
     drawEmptyChart(els.candleChart, "Loading detailed candles...");
     state.chartMeta.candle = [];
@@ -751,6 +811,7 @@ function renderTechnicalWorkspace() {
   }
   drawLineChart(els.historyChart, stock.history?.[state.historyRange] || []);
   updateChartReadout("history", state.chartMeta.history.at(-1));
+  renderStats(stock);
   renderCandleAnalysis(stock);
 }
 
