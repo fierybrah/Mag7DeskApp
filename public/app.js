@@ -23,16 +23,9 @@ const els = {
   advancers: document.querySelector("#advancers"),
   avgMove: document.querySelector("#avgMove"),
   nextRefresh: document.querySelector("#nextRefresh"),
-  marketTone: document.querySelector("#marketTone"),
-  marketToneDetail: document.querySelector("#marketToneDetail"),
-  topMover: document.querySelector("#topMover"),
-  topMoverDetail: document.querySelector("#topMoverDetail"),
-  signalMix: document.querySelector("#signalMix"),
-  signalMixDetail: document.querySelector("#signalMixDetail"),
-  leaderStrip: document.querySelector("#leaderStrip"),
+  marketPulse: document.querySelector("#marketPulse"),
   priceStrip: document.querySelector("#priceStrip"),
   stockGrid: document.querySelector("#stockGrid"),
-  technicalRows: document.querySelector("#technicalRows"),
   candleTitle: document.querySelector("#candleTitle"),
   historyTitle: document.querySelector("#historyTitle"),
   statsTitle: document.querySelector("#statsTitle"),
@@ -477,14 +470,6 @@ function renderSummary(stocks) {
   els.marketStatus.textContent = state.data?.loading ? "Updating" : (marketState || "Ready");
 }
 
-function strongestMove(stocks) {
-  const moves = stocks.filter((stock) => Number.isFinite(stock.changePercent));
-  if (!moves.length) return null;
-  return moves.reduce((leader, stock) => {
-    return Math.abs(stock.changePercent) > Math.abs(leader.changePercent) ? stock : leader;
-  }, moves[0]);
-}
-
 function renderBrief(stocks) {
   const validMoves = stocks.filter((stock) => Number.isFinite(stock.changePercent));
   const advancers = validMoves.filter((stock) => stock.changePercent > 0).length;
@@ -492,55 +477,13 @@ function renderBrief(stocks) {
   const bullish = stocks.filter((stock) => stock.technicals?.signal === "Bullish").length;
   const bearish = stocks.filter((stock) => stock.technicals?.signal === "Bearish").length;
   const neutral = stocks.filter((stock) => stock.technicals?.signal === "Neutral").length;
-  const mover = strongestMove(stocks);
-
   let tone = "Balanced";
   if (advancers >= 5) tone = "Risk On";
   if (decliners >= 5) tone = "Risk Off";
 
-  els.marketTone.textContent = validMoves.length ? tone : "--";
-  els.marketToneDetail.textContent = validMoves.length
-    ? `${advancers} advancing, ${decliners} declining across the Mag 7 basket.`
+  els.marketPulse.textContent = validMoves.length
+    ? `${tone} · ${advancers} advancing · ${decliners} declining · Signals: ${bullish} bullish, ${neutral} neutral, ${bearish} bearish.`
     : "Waiting for the latest market breadth snapshot.";
-
-  els.topMover.textContent = mover ? mover.symbol : "--";
-  els.topMoverDetail.textContent = mover
-    ? `${mover.name} is moving ${percent(mover.changePercent)} with last sale at ${money(mover.price)}.`
-    : "Waiting for a tradable price update.";
-
-  els.signalMix.textContent = `${bullish}/${neutral}/${bearish}`;
-  els.signalMixDetail.textContent = "Bullish, neutral, and bearish technical signals from SMA and RSI readings.";
-}
-
-function renderLeaders(stocks) {
-  const valid = stocks.filter((stock) => Number.isFinite(stock.changePercent));
-  if (!valid.length) {
-    els.leaderStrip.innerHTML = `<div class="empty">Market leaders will appear after the next live quote snapshot.</div>`;
-    return;
-  }
-
-  const best = valid.reduce((leader, stock) => stock.changePercent > leader.changePercent ? stock : leader, valid[0]);
-  const worst = valid.reduce((leader, stock) => stock.changePercent < leader.changePercent ? stock : leader, valid[0]);
-  const volume = stocks.filter((stock) => Number.isFinite(stock.volume)).reduce((leader, stock) => {
-    if (!leader) return stock;
-    return stock.volume > leader.volume ? stock : leader;
-  }, null);
-
-  const cards = [
-    ["Best Tape", best, percent(best.changePercent)],
-    ["Weakest Tape", worst, percent(worst.changePercent)],
-    ["Most Active", volume, compact(volume?.volume)]
-  ];
-
-  els.leaderStrip.innerHTML = cards.map(([label, stock, value]) => `
-    <article class="leader-card">
-      <div>
-        <span>${label}</span>
-        <strong>${stock?.symbol || "--"}</strong>
-      </div>
-      <b class="${stock?.changePercent >= 0 ? "up" : "down"}">${value || "--"}</b>
-    </article>
-  `).join("");
 }
 
 function stockCard(stock) {
@@ -561,13 +504,6 @@ function stockCard(stock) {
         <div class="move ${changeClass}">${money(stock.change)} ${percent(stock.changePercent)}</div>
       </div>
       <canvas class="spark" data-symbol="${stock.symbol}" aria-label="${stock.symbol} price trend"></canvas>
-      <div class="fact-grid">
-        <div class="fact"><span>Market cap</span><b>${compact(stock.marketCap)}</b></div>
-        <div class="fact"><span>P/E</span><b>${number(stock.pe)}</b></div>
-        <div class="fact"><span>EPS</span><b>${number(stock.eps)}</b></div>
-        <div class="fact"><span>Day range</span><b>${money(stock.dayLow)} - ${money(stock.dayHigh)}</b></div>
-        <div class="fact"><span>Volume</span><b>${compact(stock.volume)}</b></div>
-      </div>
     </article>
   `;
 }
@@ -614,23 +550,6 @@ function renderOverview(stocks) {
       }
     });
   });
-}
-
-function renderTechnicals(stocks) {
-  els.technicalRows.innerHTML = stocks.map((stock) => {
-    const signal = stock.technicals?.signal || "Unavailable";
-    return `
-      <tr>
-        <td><strong>${stock.symbol}</strong><br><span class="company">${stock.name}</span></td>
-        <td>${money(stock.price)}</td>
-        <td>${money(stock.technicals?.sma20)}</td>
-        <td>${money(stock.technicals?.sma50)}</td>
-        <td>${number(stock.technicals?.rsi14)}</td>
-        <td>${number(stock.technicals?.volumeRatio)}x</td>
-        <td><span class="signal ${signal}">${signal}</span></td>
-      </tr>
-    `;
-  }).join("") || `<tr><td colspan="7">No stocks match the current filters.</td></tr>`;
 }
 
 function selectedTechnicalStock() {
@@ -972,10 +891,8 @@ function render() {
   renderSummary(state.data?.stocks || []);
   renderBrief(state.data?.stocks || []);
   renderErrors();
-  renderLeaders(stocks);
   renderOverview(stocks);
   renderPriceStrip(stocks);
-  renderTechnicals(stocks);
   renderTechnicalWorkspace();
   renderNews();
 }

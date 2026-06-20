@@ -42,6 +42,7 @@
         <div>
           <p class="eyebrow">Live market workspace</p>
           <h2>Prices, signals, and technical detail</h2>
+          <p id="marketPulse" class="market-pulse">Loading market pulse.</p>
         </div>
         <p id="dataSource">Sources: Nasdaq market data and Alpaca chart data</p>
       </section>
@@ -72,26 +73,8 @@
             <strong id="nextRefresh">--</strong>
           </div>
         </section>
-        <div id="leaderStrip" class="leader-strip" aria-label="Market leaders"></div>
         <div id="priceStrip" class="price-strip" aria-label="Live Mag 7 prices"></div>
         <div id="stockGrid" class="stock-grid" aria-live="polite"></div>
-        <section class="story-grid" aria-label="Market brief">
-          <article class="brief-panel">
-            <span class="panel-label">Market Tone</span>
-            <strong id="marketTone">--</strong>
-            <p id="marketToneDetail">Loading market breadth and technical signals.</p>
-          </article>
-          <article class="brief-panel">
-            <span class="panel-label">Top Mover</span>
-            <strong id="topMover">--</strong>
-            <p id="topMoverDetail">Waiting for the latest snapshot.</p>
-          </article>
-          <article class="brief-panel">
-            <span class="panel-label">Signal Mix</span>
-            <strong id="signalMix">--</strong>
-            <p id="signalMixDetail">SMA and RSI readings update with each live refresh.</p>
-          </article>
-        </section>
         <section id="stockDetail" class="stock-detail" aria-label="Selected stock details">
         <div id="signals" class="section-head compact-head">
           <div>
@@ -172,22 +155,6 @@
             <div id="candleAnalysis" class="candle-analysis-grid" aria-live="polite"></div>
           </article>
         </section>
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Symbol</th>
-                <th>Price</th>
-                <th>SMA 20</th>
-                <th>SMA 50</th>
-                <th>RSI 14</th>
-                <th>Volume Ratio</th>
-                <th>Signal</th>
-              </tr>
-            </thead>
-            <tbody id="technicalRows"></tbody>
-          </table>
-        </div>
         </section>
       </section>
 

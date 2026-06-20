@@ -266,6 +266,13 @@ button:disabled {
   font-size: 0.9rem;
 }
 
+.market-pulse {
+  margin: 9px 0 0;
+  color: var(--muted);
+  font-size: 0.92rem;
+  line-height: 1.4;
+}
+
 .tabs {
   display: flex;
   align-items: center;
@@ -363,6 +370,28 @@ select {
   background: rgba(244, 246, 242, 0.94);
   box-shadow: 0 8px 20px rgba(32, 47, 42, 0.08);
   backdrop-filter: blur(12px);
+  scrollbar-color: #647174 rgba(217, 223, 213, 0.7);
+  scrollbar-width: auto;
+}
+
+.price-strip::-webkit-scrollbar {
+  height: 12px;
+}
+
+.price-strip::-webkit-scrollbar-track {
+  margin: 0 8px;
+  border-radius: 999px;
+  background: rgba(217, 223, 213, 0.7);
+}
+
+.price-strip::-webkit-scrollbar-thumb {
+  border: 3px solid rgba(244, 246, 242, 0.94);
+  border-radius: 999px;
+  background: #647174;
+}
+
+.price-strip::-webkit-scrollbar-thumb:hover {
+  background: #425053;
 }
 
 .price-strip-item {
@@ -411,7 +440,7 @@ select {
 .stock-card {
   display: grid;
   gap: 12px;
-  min-height: 286px;
+  min-height: 224px;
   padding: 16px;
   border: 1px solid var(--line);
   border-radius: 8px;
