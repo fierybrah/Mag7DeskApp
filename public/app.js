@@ -754,6 +754,48 @@ function analyseCandlestickPattern(candles) {
   return { signal: "Neutral", text: "No obvious candlestick trend or reversal pattern." };
 }
 
+function drawAnalysisCandles(canvas, candles) {
+  const visible = (candles || []).filter((candle) => [candle.open, candle.high, candle.low, candle.close].every(Number.isFinite)).slice(-24);
+  if (!visible.length) return;
+
+  const { ctx, scale, width, height } = setupCanvas(canvas);
+  const padding = 10 * scale;
+  const values = visible.flatMap((candle) => [candle.open, candle.high, candle.low, candle.close]);
+  const low = Math.min(...values);
+  const high = Math.max(...values);
+  const extra = (high - low || high * 0.01 || 1) * 0.08;
+  const min = low - extra;
+  const max = high + extra;
+  const yFor = (value) => height - padding - ((value - min) / (max - min || 1)) * (height - padding * 2);
+  const chartWidth = width - padding * 2;
+  const candleWidth = Math.max(2 * scale, chartWidth / visible.length * 0.56);
+
+  ctx.strokeStyle = "rgba(217, 223, 213, 0.85)";
+  ctx.lineWidth = scale;
+  [0.25, 0.5, 0.75].forEach((ratio) => {
+    const y = padding + (height - padding * 2) * ratio;
+    ctx.beginPath();
+    ctx.moveTo(padding, y);
+    ctx.lineTo(width - padding, y);
+    ctx.stroke();
+  });
+
+  visible.forEach((candle, index) => {
+    const x = padding + (index + 0.5) / visible.length * chartWidth;
+    const openY = yFor(candle.open);
+    const closeY = yFor(candle.close);
+    const positive = candle.close >= candle.open;
+    ctx.strokeStyle = positive ? "#147a54" : "#b33a3a";
+    ctx.fillStyle = positive ? "rgba(20, 122, 84, 0.25)" : "rgba(179, 58, 58, 0.22)";
+    ctx.beginPath();
+    ctx.moveTo(x, yFor(candle.high));
+    ctx.lineTo(x, yFor(candle.low));
+    ctx.stroke();
+    ctx.fillRect(x - candleWidth / 2, Math.min(openY, closeY), candleWidth, Math.max(2 * scale, Math.abs(closeY - openY)));
+    ctx.strokeRect(x - candleWidth / 2, Math.min(openY, closeY), candleWidth, Math.max(2 * scale, Math.abs(closeY - openY)));
+  });
+}
+
 function renderCandleAnalysis(stock) {
   if (!els.candleAnalysis) return;
   if (!stock) {
@@ -774,9 +816,12 @@ function renderCandleAnalysis(stock) {
       return `<article class="candle-analysis-card"><header><strong>${periodLabel} · ${interval}</strong><span class="candle-signal neutral">Unavailable</span></header><p>No candles are available for this reading.</p></article>`;
     }
     const analysis = analyseCandlestickPattern(data.candles);
-    return `<article class="candle-analysis-card"><header><strong>${periodLabel} · ${interval}</strong><span class="candle-signal ${analysis.signal.toLowerCase()}">${analysis.signal}</span></header><p>${analysis.text}</p></article>`;
+    return `<article class="candle-analysis-card"><header><strong>${periodLabel} · ${interval}</strong><span class="candle-signal ${analysis.signal.toLowerCase()}">${analysis.signal}</span></header><p>${analysis.text}</p><canvas class="analysis-candle-chart" data-analysis-candle-key="${key}" aria-label="${periodLabel} ${interval} candlestick pattern preview"></canvas></article>`;
   }));
   els.candleAnalysis.innerHTML = cards.join("");
+  els.candleAnalysis.querySelectorAll("[data-analysis-candle-key]").forEach((canvas) => {
+    drawAnalysisCandles(canvas, state.candleData[canvas.dataset.analysisCandleKey]?.candles);
+  });
 }
 
 function renderTechnicalWorkspace() {
