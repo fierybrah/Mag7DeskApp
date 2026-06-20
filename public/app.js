@@ -759,29 +759,51 @@ function drawAnalysisCandles(canvas, candles) {
   if (!visible.length) return;
 
   const { ctx, scale, width, height } = setupCanvas(canvas);
-  const padding = 10 * scale;
+  const padding = { left: 52 * scale, right: 10 * scale, top: 10 * scale, bottom: 26 * scale };
   const values = visible.flatMap((candle) => [candle.open, candle.high, candle.low, candle.close]);
   const low = Math.min(...values);
   const high = Math.max(...values);
   const extra = (high - low || high * 0.01 || 1) * 0.08;
   const min = low - extra;
   const max = high + extra;
-  const yFor = (value) => height - padding - ((value - min) / (max - min || 1)) * (height - padding * 2);
-  const chartWidth = width - padding * 2;
+  const plotHeight = height - padding.top - padding.bottom;
+  const yFor = (value) => height - padding.bottom - ((value - min) / (max - min || 1)) * plotHeight;
+  const chartWidth = width - padding.left - padding.right;
   const candleWidth = Math.max(2 * scale, chartWidth / visible.length * 0.56);
 
   ctx.strokeStyle = "rgba(217, 223, 213, 0.85)";
   ctx.lineWidth = scale;
-  [0.25, 0.5, 0.75].forEach((ratio) => {
-    const y = padding + (height - padding * 2) * ratio;
+  ctx.fillStyle = "#647174";
+  ctx.font = `${10 * scale}px system-ui, sans-serif`;
+  ctx.textBaseline = "middle";
+  ctx.textAlign = "right";
+  [0, 0.5, 1].forEach((ratio) => {
+    const y = padding.top + plotHeight * ratio;
+    const value = max - (max - min) * ratio;
     ctx.beginPath();
-    ctx.moveTo(padding, y);
-    ctx.lineTo(width - padding, y);
+    ctx.moveTo(padding.left, y);
+    ctx.lineTo(width - padding.right, y);
     ctx.stroke();
+    ctx.fillText(shortPrice(value), padding.left - 6 * scale, y);
+  });
+
+  const firstDate = parseChartDate(visible[0].time || visible[0].date);
+  const lastDate = parseChartDate(visible.at(-1).time || visible.at(-1).date);
+  const spansMultipleDays = firstDate && lastDate && firstDate.toDateString() !== lastDate.toDateString();
+  const labelIndexes = [0, Math.floor((visible.length - 1) / 2), visible.length - 1];
+  ctx.textBaseline = "top";
+  ctx.textAlign = "center";
+  labelIndexes.forEach((index) => {
+    const candle = visible[index];
+    const label = spansMultipleDays
+      ? formatAxisDate(candle.time || candle.date, "day")
+      : formatAxisDate(candle.time || candle.date, "intraday");
+    const x = padding.left + (index + 0.5) / visible.length * chartWidth;
+    ctx.fillText(label, x, height - padding.bottom + 7 * scale);
   });
 
   visible.forEach((candle, index) => {
-    const x = padding + (index + 0.5) / visible.length * chartWidth;
+    const x = padding.left + (index + 0.5) / visible.length * chartWidth;
     const openY = yFor(candle.open);
     const closeY = yFor(candle.close);
     const positive = candle.close >= candle.open;
