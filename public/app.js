@@ -10,7 +10,7 @@ const state = {
   candlePan: 0,
   historyRange: "day",
   candleData: {},
-  candleLoadingKey: null,
+  candleLoadingKeys: new Set(),
   chartMeta: {
     candle: [],
     history: []
@@ -49,6 +49,7 @@ const els = {
   candlePanLater: document.querySelector("#candlePanLater"),
   historyChart: document.querySelector("#historyChart"),
   candleReadout: document.querySelector("#candleReadout"),
+  candleAnalysis: document.querySelector("#candleAnalysis"),
   historyReadout: document.querySelector("#historyReadout"),
   profileGrid: document.querySelector("#profileGrid"),
   statsGrid: document.querySelector("#statsGrid"),
@@ -126,20 +127,20 @@ function syncTechnicalSymbolToSearch() {
   }
 }
 
-function candleKey(symbol = state.technicalSymbol) {
-  return `${symbol}:${state.candlePeriod}:${state.candleInterval}`;
+function candleKey(symbol = state.technicalSymbol, period = state.candlePeriod, interval = state.candleInterval) {
+  return `${symbol}:${period}:${interval}`;
 }
 
-async function loadDetailedCandles(symbol) {
-  const key = candleKey(symbol);
-  if (state.candleData[key] || state.candleLoadingKey === key) return;
+async function loadDetailedCandles(symbol, period = state.candlePeriod, interval = state.candleInterval) {
+  const key = candleKey(symbol, period, interval);
+  if (state.candleData[key] || state.candleLoadingKeys.has(key)) return;
 
-  state.candleLoadingKey = key;
+  state.candleLoadingKeys.add(key);
   try {
     const params = new URLSearchParams({
       symbol,
-      period: state.candlePeriod,
-      interval: state.candleInterval
+      period,
+      interval
     });
     const response = await fetch(`/api/candles?${params}`);
     if (!response.ok) throw new Error(`Candles failed with ${response.status}`);
@@ -147,16 +148,14 @@ async function loadDetailedCandles(symbol) {
   } catch (error) {
     state.candleData[key] = {
       symbol,
-      period: state.candlePeriod,
-      interval: state.candleInterval,
+      period,
+      interval,
       note: error.message,
       candles: []
     };
   } finally {
-    if (state.candleLoadingKey === key) {
-      state.candleLoadingKey = null;
-    }
-    if (candleKey(symbol) === key) {
+    state.candleLoadingKeys.delete(key);
+    if (symbol === state.technicalSymbol) {
       renderTechnicalWorkspace();
     }
   }
@@ -696,6 +695,90 @@ function renderStats(stock) {
   `).join("");
 }
 
+function analyseCandlestickPattern(candles) {
+  const valid = (candles || []).filter((candle) => [candle.open, candle.high, candle.low, candle.close].every(Number.isFinite));
+  if (valid.length < 8) {
+    return { signal: "Neutral", text: "Not enough completed candles for a reliable pattern reading." };
+  }
+
+  const sample = valid.slice(-24);
+  const last = sample.at(-1);
+  const previous = sample.at(-2);
+  const recentThree = sample.slice(-3);
+  const candleRange = (candle) => Math.max(candle.high - candle.low, 0);
+  const body = (candle) => Math.abs(candle.close - candle.open);
+  const averageRange = sample.reduce((total, candle) => total + candleRange(candle), 0) / sample.length;
+  const change = last.close - sample[0].close;
+  const directionalMoves = sample.slice(1);
+  const risingCloses = directionalMoves.filter((candle, index) => candle.close > sample[index].close).length;
+  const fallingCloses = directionalMoves.filter((candle, index) => candle.close < sample[index].close).length;
+  const higherHighs = directionalMoves.filter((candle, index) => candle.high > sample[index].high).length;
+  const higherLows = directionalMoves.filter((candle, index) => candle.low > sample[index].low).length;
+  const lowerHighs = directionalMoves.filter((candle, index) => candle.high < sample[index].high).length;
+  const lowerLows = directionalMoves.filter((candle, index) => candle.low < sample[index].low).length;
+  const largeBodies = recentThree.every((candle) => body(candle) >= candleRange(candle) * 0.45);
+  const threeRising = recentThree.length === 3
+    && recentThree.every((candle) => candle.close > candle.open)
+    && recentThree[1].close > recentThree[0].close
+    && recentThree[2].close > recentThree[1].close
+    && largeBodies;
+  const threeFalling = recentThree.length === 3
+    && recentThree.every((candle) => candle.close < candle.open)
+    && recentThree[1].close < recentThree[0].close
+    && recentThree[2].close < recentThree[1].close
+    && largeBodies;
+  const bullishEngulfing = previous.close < previous.open
+    && last.close > last.open
+    && last.open <= previous.close
+    && last.close >= previous.open
+    && body(last) >= body(previous) * 1.2;
+  const bearishEngulfing = previous.close > previous.open
+    && last.close < last.open
+    && last.open >= previous.close
+    && last.close <= previous.open
+    && body(last) >= body(previous) * 1.2;
+
+  if (threeRising) return { signal: "Bullish", text: "Three consecutive strong rising candles are visible." };
+  if (threeFalling) return { signal: "Bearish", text: "Three consecutive strong falling candles are visible." };
+  if (bullishEngulfing) return { signal: "Bullish", text: "A bullish engulfing candle is visible at the latest bar." };
+  if (bearishEngulfing) return { signal: "Bearish", text: "A bearish engulfing candle is visible at the latest bar." };
+
+  const clearMove = averageRange > 0 && Math.abs(change) >= averageRange * 2.5;
+  const enough = directionalMoves.length * 0.65;
+  if (clearMove && change > 0 && risingCloses >= enough && higherHighs >= enough && higherLows >= enough) {
+    return { signal: "Bullish", text: `Clear higher highs and higher lows across the latest ${sample.length} candles.` };
+  }
+  if (clearMove && change < 0 && fallingCloses >= enough && lowerHighs >= enough && lowerLows >= enough) {
+    return { signal: "Bearish", text: `Clear lower highs and lower lows across the latest ${sample.length} candles.` };
+  }
+  return { signal: "Neutral", text: "No obvious candlestick trend or reversal pattern." };
+}
+
+function renderCandleAnalysis(stock) {
+  if (!els.candleAnalysis) return;
+  if (!stock) {
+    els.candleAnalysis.innerHTML = `<div class="empty">Select a stock to view candlestick analysis.</div>`;
+    return;
+  }
+
+  const periods = [["day", "1D"], ["week", "1W"], ["threeMonth", "3M"]];
+  const intervals = ["5m", "15m", "30m"];
+  const cards = periods.flatMap(([period, periodLabel]) => intervals.map((interval) => {
+    const key = candleKey(stock.symbol, period, interval);
+    const data = state.candleData[key];
+    if (!data) {
+      loadDetailedCandles(stock.symbol, period, interval);
+      return `<article class="candle-analysis-card"><header><strong>${periodLabel} · ${interval}</strong><span class="candle-signal neutral">Loading</span></header><p>Fetching candles for pattern analysis.</p></article>`;
+    }
+    if (!data.candles?.length) {
+      return `<article class="candle-analysis-card"><header><strong>${periodLabel} · ${interval}</strong><span class="candle-signal neutral">Unavailable</span></header><p>No candles are available for this reading.</p></article>`;
+    }
+    const analysis = analyseCandlestickPattern(data.candles);
+    return `<article class="candle-analysis-card"><header><strong>${periodLabel} · ${interval}</strong><span class="candle-signal ${analysis.signal.toLowerCase()}">${analysis.signal}</span></header><p>${analysis.text}</p></article>`;
+  }));
+  els.candleAnalysis.innerHTML = cards.join("");
+}
+
 function renderTechnicalWorkspace() {
   const stocks = state.data?.stocks || [];
   renderTechnicalSelector(stocks);
@@ -706,6 +789,7 @@ function renderTechnicalWorkspace() {
     disableCandleZoomControls();
     drawEmptyChart(els.historyChart, "Waiting for historical data.");
     renderStats(null);
+    renderCandleAnalysis(null);
     return;
   }
 
@@ -761,6 +845,7 @@ function renderTechnicalWorkspace() {
   drawLineChart(els.historyChart, stock.history?.[state.historyRange] || []);
   updateChartReadout("history", state.chartMeta.history.at(-1));
   renderStats(stock);
+  renderCandleAnalysis(stock);
 }
 
 function renderNews() {
