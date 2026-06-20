@@ -754,8 +754,27 @@ function analyseCandlestickPattern(candles) {
   return { signal: "Neutral", text: "No obvious candlestick trend or reversal pattern." };
 }
 
+function compactAnalysisPreviewCandles(candles, maxCandles = 72) {
+  if (candles.length <= maxCandles) return candles;
+  const groupSize = Math.ceil(candles.length / maxCandles);
+  const compacted = [];
+  for (let index = 0; index < candles.length; index += groupSize) {
+    const group = candles.slice(index, index + groupSize);
+    compacted.push({
+      open: group[0].open,
+      high: Math.max(...group.map((candle) => candle.high)),
+      low: Math.min(...group.map((candle) => candle.low)),
+      close: group.at(-1).close,
+      time: group.at(-1).time,
+      date: group.at(-1).date
+    });
+  }
+  return compacted;
+}
+
 function drawAnalysisCandles(canvas, candles) {
-  const visible = (candles || []).filter((candle) => [candle.open, candle.high, candle.low, candle.close].every(Number.isFinite)).slice(-24);
+  const source = (candles || []).filter((candle) => [candle.open, candle.high, candle.low, candle.close].every(Number.isFinite));
+  const visible = compactAnalysisPreviewCandles(source);
   if (!visible.length) return;
 
   const { ctx, scale, width, height } = setupCanvas(canvas);
