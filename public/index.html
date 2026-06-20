@@ -74,14 +74,13 @@
           </div>
         </section>
         <div id="priceStrip" class="price-strip" aria-label="Live Mag 7 prices"></div>
-        <div id="stockGrid" class="stock-grid" aria-live="polite"></div>
         <section id="stockDetail" class="stock-detail" aria-label="Selected stock details">
         <div id="signals" class="section-head compact-head">
           <div>
             <p class="eyebrow">Selected stock</p>
             <h2>Full market and technical detail</h2>
           </div>
-          <p class="detail-hint">Choose any stock card above to update this workspace.</p>
+          <p id="selectedSignalHint" class="detail-hint">Select a stock from the live-price strip above.</p>
         </div>
         <section class="technical-workspace" aria-label="Selected stock technical charts and stats">
           <article class="chart-panel">
@@ -133,16 +132,6 @@
             </div>
             <canvas id="historyChart" class="market-chart" aria-label="Historical price chart"></canvas>
             <div id="historyReadout" class="chart-readout">Move over the chart to inspect date and closing price.</div>
-          </article>
-          <article class="stats-panel">
-            <div class="panel-head">
-              <div>
-                <span class="panel-label">Full technicals</span>
-                <strong id="statsTitle">--</strong>
-              </div>
-            </div>
-            <div id="profileGrid" class="profile-grid"></div>
-            <div id="statsGrid" class="stats-grid"></div>
           </article>
           <article class="candle-analysis-panel">
             <div class="panel-head">

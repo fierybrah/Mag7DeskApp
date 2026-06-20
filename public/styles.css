@@ -511,6 +511,19 @@ select {
   color: var(--red);
 }
 
+.signal-summary {
+  display: grid;
+  justify-items: end;
+  gap: 4px;
+}
+
+.signal-reason {
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-align: right;
+}
+
 .price {
   font-size: 1.8rem;
   font-weight: 850;
