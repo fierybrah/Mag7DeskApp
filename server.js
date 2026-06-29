@@ -32,7 +32,8 @@ const state = {
   errors: [],
   candleCache: new Map(),
   stocks: [],
-  news: []
+  news: [],
+  analystReviews: []
 };
 
 function json(res, status, payload) {
@@ -242,6 +243,21 @@ async function fetchAlpacaJson(url) {
 
 async function fetchText(url) {
   return timedFetchText(url, "application/rss+xml,text/xml,text/plain,*/*");
+}
+
+function yahooValue(value) {
+  if (value && typeof value === "object" && "raw" in value) return value.raw;
+  return value;
+}
+
+function yahooText(value) {
+  const raw = yahooValue(value);
+  return raw == null ? "" : String(raw).trim();
+}
+
+function yahooNumber(value) {
+  const raw = yahooValue(value);
+  return typeof raw === "number" && Number.isFinite(raw) ? raw : parseNumber(raw);
 }
 
 function average(values) {
@@ -710,6 +726,64 @@ function parseRss(xml, symbol) {
   }).filter((item) => item.title && item.link);
 }
 
+async function fetchAnalystReview(stock) {
+  try {
+    const modules = "financialData,recommendationTrend,upgradeDowngradeHistory";
+    const url = `https://query2.finance.yahoo.com/v10/finance/quoteSummary/${stock.symbol}?modules=${modules}`;
+    const payload = await fetchYahooJson(url);
+    const result = payload.quoteSummary?.result?.[0] || {};
+    const financialData = result.financialData || {};
+    const trend = result.recommendationTrend?.trend?.[0] || {};
+    const latestAction = (result.upgradeDowngradeHistory?.history || [])
+      .slice()
+      .sort((a, b) => yahooNumber(b.epochGradeDate) - yahooNumber(a.epochGradeDate))
+      .find((item) => yahooText(item.firm) || yahooText(item.toGrade));
+
+    const recommendation = yahooText(financialData.recommendationKey);
+    const meanRating = yahooNumber(financialData.recommendationMean);
+    const analystCount = yahooNumber(financialData.numberOfAnalystOpinions)
+      || yahooNumber(trend.strongBuy) + yahooNumber(trend.buy) + yahooNumber(trend.hold) + yahooNumber(trend.sell) + yahooNumber(trend.strongSell);
+    const targetMeanPrice = yahooNumber(financialData.targetMeanPrice);
+    const firm = yahooText(latestAction?.firm);
+    const toGrade = yahooText(latestAction?.toGrade);
+
+    if (!recommendation && !Number.isFinite(meanRating) && !Number.isFinite(targetMeanPrice) && !firm && !toGrade) {
+      throw new Error("No analyst summary available");
+    }
+
+    return {
+      symbol: stock.symbol,
+      name: stock.name,
+      recommendation,
+      meanRating: formatNumber(meanRating),
+      analystCount: Number.isFinite(analystCount) ? analystCount : null,
+      targetMeanPrice: formatNumber(targetMeanPrice),
+      targetHighPrice: formatNumber(yahooNumber(financialData.targetHighPrice)),
+      targetLowPrice: formatNumber(yahooNumber(financialData.targetLowPrice)),
+      firm,
+      action: yahooText(latestAction?.action),
+      fromGrade: yahooText(latestAction?.fromGrade),
+      toGrade,
+      latestActionDate: yahooNumber(latestAction?.epochGradeDate)
+        ? new Date(yahooNumber(latestAction.epochGradeDate) * 1000).toISOString()
+        : null,
+      source: "Yahoo Finance"
+    };
+  } catch (error) {
+    const query = encodeURIComponent(`${stock.symbol} ${stock.name} stock analyst rating price target when:14d`);
+    const url = `https://news.google.com/rss/search?q=${query}&hl=en-US&gl=US&ceid=US:en`;
+    const xml = await fetchText(url);
+    const item = parseRss(xml, stock.symbol)[0];
+    if (!item) return null;
+    return {
+      ...item,
+      name: stock.name,
+      recommendation: "Analyst Review",
+      source: item.source || "Google News"
+    };
+  }
+}
+
 function dateForUrl(date) {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, "0");
@@ -811,6 +885,7 @@ async function collectSnapshot() {
       if (!state.lastUpdated) {
         state.stocks = fallbackStocks();
         state.news = [];
+        state.analystReviews = [];
       }
       state.loading = false;
       state.lastUpdated = new Date().toISOString();
@@ -864,6 +939,7 @@ async function collectNews(force = false) {
       const xml = await fetchText(url);
       return parseRss(xml, stock.symbol);
     }));
+    const reviewResults = await Promise.allSettled(STOCKS.map(fetchAnalystReview));
 
     let newsFailureCount = 0;
     const news = newsResults.flatMap((result, index) => {
@@ -874,6 +950,13 @@ async function collectNews(force = false) {
       }
       return result.value;
     });
+    const analystReviews = reviewResults.flatMap((result, index) => {
+      if (result.status === "rejected") {
+        state.errors.push(`${STOCKS[index].symbol} analyst reviews: ${result.reason.message}`);
+        return [];
+      }
+      return result.value ? [result.value] : [];
+    });
 
     const seen = new Set();
     const freshNews = news.filter((item) => {
@@ -883,6 +966,13 @@ async function collectNews(force = false) {
       return true;
     }).sort((a, b) => new Date(b.published || 0) - new Date(a.published || 0)).slice(0, 40);
     state.news = newsFailureCount && previousNews.length ? previousNews : freshNews;
+    if (analystReviews.length) {
+      state.analystReviews = analystReviews.sort((a, b) => {
+        const aDate = new Date(a.latestActionDate || 0);
+        const bDate = new Date(b.latestActionDate || 0);
+        return bDate - aDate;
+      });
+    }
     state.lastNewsUpdated = new Date().toISOString();
     state.nextNewsRefresh = new Date(Date.now() + NEWS_REFRESH_MS).toISOString();
   } catch (error) {
@@ -955,7 +1045,8 @@ function serializableState() {
     refreshIntervalMs: REFRESH_MS,
     newsRefreshIntervalMs: NEWS_REFRESH_MS,
     stocks: state.stocks,
-    news: state.news
+    news: state.news,
+    analystReviews: state.analystReviews
   };
 }
 
