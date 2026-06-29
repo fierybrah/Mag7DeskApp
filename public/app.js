@@ -25,6 +25,7 @@ const els = {
   nextRefresh: document.querySelector("#nextRefresh"),
   marketPulse: document.querySelector("#marketPulse"),
   priceStrip: document.querySelector("#priceStrip"),
+  newsStockStrip: document.querySelector("#newsStockStrip"),
   selectedSignalHint: document.querySelector("#selectedSignalHint"),
   candleTitle: document.querySelector("#candleTitle"),
   historyTitle: document.querySelector("#historyTitle"),
@@ -506,14 +507,15 @@ function signalRationale(stock) {
   return "SMA trend unavailable";
 }
 
-function renderPriceStrip(stocks) {
-  els.priceStrip.innerHTML = stocks.map((stock) => {
+function renderPriceStrip(stocks, target = els.priceStrip, scrollOnSelect = true) {
+  if (!target) return;
+  target.innerHTML = stocks.map((stock) => {
     const selected = stock.symbol === state.technicalSymbol;
     const direction = stock.changePercent >= 0 ? "up" : "down";
     return `<button class="price-strip-item ${selected ? "active" : ""}" data-stock-select="${stock.symbol}" type="button" aria-pressed="${selected}" aria-label="Select ${stock.name}"><span>${stock.symbol}</span><strong>${money(stock.price)}</strong><b class="${direction}">${percent(stock.changePercent)}</b></button>`;
   }).join("");
-  els.priceStrip.querySelectorAll("[data-stock-select]").forEach((element) => {
-    element.addEventListener("click", () => selectStock(element.dataset.stockSelect));
+  target.querySelectorAll("[data-stock-select]").forEach((element) => {
+    element.addEventListener("click", () => selectStock(element.dataset.stockSelect, scrollOnSelect));
   });
 }
 
@@ -523,7 +525,9 @@ function selectStock(symbol, scrollToDetail = true) {
   state.candleZoom = 1;
   state.candlePan = 0;
   renderPriceStrip(filteredStocks());
+  renderPriceStrip(filteredStocks(), els.newsStockStrip, false);
   renderTechnicalWorkspace();
+  renderNews();
   if (scrollToDetail) {
     window.requestAnimationFrame(() => document.querySelector("#stockDetail")?.scrollIntoView({ behavior: "smooth", block: "start" }));
   }
@@ -825,23 +829,21 @@ function renderTechnicalWorkspace() {
 }
 
 function renderNews() {
-  const visibleStocks = filteredStocks();
-  const symbols = new Set(visibleStocks.map((stock) => stock.symbol));
-  const reviews = (state.data?.analystReviews || []).filter((item) => {
-    const matchesSymbol = !symbols.size || symbols.has(item.symbol);
-    return matchesSymbol;
-  });
-  const items = (state.data?.news || []).filter((item) => {
-    const matchesSymbol = !symbols.size || symbols.has(item.symbol);
-    return matchesSymbol;
-  });
+  const stocks = filteredStocks();
+  const selectedStock = selectedTechnicalStock();
+  const selectedSymbol = selectedStock?.symbol;
+  renderPriceStrip(stocks, els.newsStockStrip, false);
+
+  const reviews = (state.data?.analystReviews || []).filter((item) => item.symbol === selectedSymbol);
+  const items = (state.data?.news || []).filter((item) => item.symbol === selectedSymbol);
 
   els.analystReviews.innerHTML = reviews.length
-    ? reviews.slice(0, 7).map((item) => {
-      const recommendation = titleCase(item.recommendation || item.toGrade || "Analyst Review");
-      const rating = Number.isFinite(item.meanRating) ? `${number(item.meanRating)} avg` : "Consensus";
+    ? reviews.slice(0, 6).map((item) => {
+      const recommendation = titleCase(item.recommendation || item.toGrade || item.action || "Analyst Review");
+      const rating = Number.isFinite(item.meanRating) ? `${number(item.meanRating)} avg` : (item.toGrade || item.action || "Firm note");
       const target = Number.isFinite(item.targetMeanPrice) ? money(item.targetMeanPrice) : "--";
-      const latestAction = [item.firm, item.action ? titleCase(item.action) : "", item.toGrade].filter(Boolean).join(" · ");
+      const firm = item.firm || item.source || "Analyst";
+      const latestAction = [item.action ? titleCase(item.action) : "", item.fromGrade && item.toGrade ? `${item.fromGrade} to ${item.toGrade}` : item.toGrade].filter(Boolean).join(" · ");
       const range = Number.isFinite(item.targetLowPrice) && Number.isFinite(item.targetHighPrice)
         ? `${money(item.targetLowPrice)}-${money(item.targetHighPrice)}`
         : "Target range unavailable";
@@ -852,27 +854,27 @@ function renderNews() {
         <article class="analyst-review-card">
           <header>
             <div>
-              <span class="review-symbol">${item.symbol}</span>
+              <span class="review-symbol">${firm}</span>
               <strong>${recommendation}</strong>
             </div>
             <span>${rating}</span>
           </header>
-          ${item.link ? "" : `
-            <div class="review-target">
-              <span>Mean target</span>
-              <strong>${target}</strong>
-            </div>
-            <dl>
-              <div><dt>Analysts</dt><dd>${plainNumber(item.analystCount)}</dd></div>
-              <div><dt>Range</dt><dd>${range}</dd></div>
-            </dl>
-          `}
+          <div class="review-target">
+            <span>${item.kind === "consensus" ? "Mean target" : (item.targetType || "Price target")}</span>
+            <strong>${target}</strong>
+          </div>
+          ${item.kind === "consensus" ? `
+          <dl>
+            <div><dt>Analysts</dt><dd>${plainNumber(item.analystCount)}</dd></div>
+            <div><dt>Range</dt><dd>${range}</dd></div>
+          </dl>
+          ` : ""}
           ${reviewSummary}
           <div class="review-source">${item.source || "Market data"}${item.published ? ` · ${dateTime(item.published)}` : ""}</div>
         </article>
       `;
     }).join("")
-    : `<div class="empty">Top analyst reviews are still loading.</div>`;
+    : `<div class="empty">Top analyst reviews for ${selectedSymbol || "this stock"} are still loading.</div>`;
 
   if (items.length) {
     els.newsList.innerHTML = items.map((item) => `
@@ -884,17 +886,16 @@ function renderNews() {
     return;
   }
 
-  const fallbackStocks = visibleStocks.length ? visibleStocks : (state.data?.stocks || []);
-  els.newsList.innerHTML = fallbackStocks.length
-    ? fallbackStocks.map((stock) => {
-      const searchUrl = `https://news.google.com/search?q=${encodeURIComponent(`${stock.symbol} ${stock.name} stock`)}`;
+  els.newsList.innerHTML = selectedStock
+    ? (() => {
+      const searchUrl = `https://news.google.com/search?q=${encodeURIComponent(`${selectedStock.symbol} ${selectedStock.name} stock`)}`;
       return `
-        <article class="news-item news-search-item">
-          <a href="${searchUrl}" target="_blank" rel="noreferrer">${stock.symbol} headline search</a>
-          <div class="news-meta">Open current market headlines for ${stock.name}</div>
-        </article>
-      `;
-    }).join("")
+      <article class="news-item news-search-item">
+        <a href="${searchUrl}" target="_blank" rel="noreferrer">${selectedStock.symbol} headline search</a>
+        <div class="news-meta">Open current market headlines for ${selectedStock.name}</div>
+      </article>
+    `;
+    })()
     : `<div class="empty">Live headlines are still loading. Try refreshing again in a moment.</div>`;
 }
 
@@ -912,6 +913,7 @@ function render() {
   renderBrief(state.data?.stocks || []);
   renderErrors();
   renderPriceStrip(stocks);
+  renderPriceStrip(stocks, els.newsStockStrip, false);
   renderTechnicalWorkspace();
   renderNews();
 }
