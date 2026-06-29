@@ -260,6 +260,52 @@ function yahooNumber(value) {
   return typeof raw === "number" && Number.isFinite(raw) ? raw : parseNumber(raw);
 }
 
+function extractPriceTarget(title) {
+  const matches = [...String(title || "").matchAll(/\$([0-9][0-9,]*(?:\.[0-9]+)?)/g)]
+    .map((match) => parseNumber(match[1]))
+    .filter(Number.isFinite);
+  return matches.length ? matches.at(-1) : null;
+}
+
+function inferAnalystFirm(item) {
+  const title = item.title || "";
+  const firms = [
+    "Bank of America", "BofA", "Morgan Stanley", "Goldman Sachs", "JPMorgan", "JP Morgan",
+    "Wells Fargo", "Citigroup", "Citi", "Barclays", "UBS", "Deutsche Bank", "Mizuho",
+    "Wedbush", "Evercore", "Piper Sandler", "Bernstein", "Jefferies", "RBC", "TD Cowen",
+    "Needham", "Oppenheimer", "Loop Capital", "Truist", "Stifel", "Cantor Fitzgerald",
+    "KeyBanc", "Raymond James", "Rosenblatt", "Tigress", "D.A. Davidson", "Baird"
+  ];
+  const firm = firms.find((name) => title.toLowerCase().includes(name.toLowerCase()));
+  return firm || item.source || "Analyst";
+}
+
+function inferAnalystAction(title) {
+  const normalized = String(title || "").toLowerCase();
+  if (normalized.includes("downgrade")) return "Downgrade";
+  if (normalized.includes("upgrade")) return "Upgrade";
+  if (normalized.includes("raise") || normalized.includes("boost")) return "Raised target";
+  if (normalized.includes("lower") || normalized.includes("cut")) return "Lowered target";
+  if (normalized.includes("initiates") || normalized.includes("initiated")) return "Initiated";
+  if (normalized.includes("reiterate") || normalized.includes("maintain")) return "Reiterated";
+  return "Analyst note";
+}
+
+async function fetchNasdaqAnalystTarget(symbol) {
+  const payload = await fetchJson(`https://api.nasdaq.com/api/analyst/${symbol}/targetprice`);
+  const overview = payload.data?.consensusOverview || {};
+  const latestHistory = (payload.data?.historicalConsensus || []).at(-1)?.z || {};
+  return {
+    priceTarget: formatNumber(parseNumber(overview.priceTarget)),
+    highPriceTarget: formatNumber(parseNumber(overview.highPriceTarget)),
+    lowPriceTarget: formatNumber(parseNumber(overview.lowPriceTarget)),
+    buy: parseNumber(overview.buy ?? latestHistory.buy),
+    hold: parseNumber(overview.hold ?? latestHistory.hold),
+    sell: parseNumber(overview.sell ?? latestHistory.sell),
+    consensus: latestHistory.consensus || ""
+  };
+}
+
 function average(values) {
   const valid = values.filter((value) => Number.isFinite(value));
   if (!valid.length) return null;
@@ -702,7 +748,7 @@ function parseRss(xml, symbol) {
   return items.map((match) => {
     const item = match[1];
     const get = (tag) => {
-      const value = item.match(new RegExp(`<${tag}>([\\s\\S]*?)<\\/${tag}>`))?.[1] || "";
+      const value = item.match(new RegExp(`<${tag}(?:\\s[^>]*)?>([\\s\\S]*?)<\\/${tag}>`))?.[1] || "";
       return value
         .replace(/<!\[CDATA\[/g, "")
         .replace(/\]\]>/g, "")
@@ -726,7 +772,37 @@ function parseRss(xml, symbol) {
   }).filter((item) => item.title && item.link);
 }
 
-async function fetchAnalystReview(stock) {
+async function fetchAnalystReviews(stock) {
+  const reviews = [];
+  let targetOverview = null;
+
+  try {
+    targetOverview = await fetchNasdaqAnalystTarget(stock.symbol);
+    if (Number.isFinite(targetOverview.priceTarget)) {
+      const analystCount = [targetOverview.buy, targetOverview.hold, targetOverview.sell]
+        .filter(Number.isFinite)
+        .reduce((sum, value) => sum + value, 0);
+      reviews.push({
+        symbol: stock.symbol,
+        name: stock.name,
+        kind: "consensus",
+        firm: "Analyst consensus",
+        title: `${stock.symbol} ${targetOverview.consensus || "analyst"} consensus`,
+        recommendation: targetOverview.consensus,
+        analystCount: analystCount || null,
+        targetMeanPrice: targetOverview.priceTarget,
+        targetHighPrice: targetOverview.highPriceTarget,
+        targetLowPrice: targetOverview.lowPriceTarget,
+        buy: targetOverview.buy,
+        hold: targetOverview.hold,
+        sell: targetOverview.sell,
+        source: "Nasdaq"
+      });
+    }
+  } catch (error) {
+    // Keep the rest of the analyst feed available if Nasdaq target data is temporarily unavailable.
+  }
+
   try {
     const modules = "financialData,recommendationTrend,upgradeDowngradeHistory";
     const url = `https://query2.finance.yahoo.com/v10/finance/quoteSummary/${stock.symbol}?modules=${modules}`;
@@ -734,10 +810,11 @@ async function fetchAnalystReview(stock) {
     const result = payload.quoteSummary?.result?.[0] || {};
     const financialData = result.financialData || {};
     const trend = result.recommendationTrend?.trend?.[0] || {};
-    const latestAction = (result.upgradeDowngradeHistory?.history || [])
+    const latestActions = (result.upgradeDowngradeHistory?.history || [])
       .slice()
       .sort((a, b) => yahooNumber(b.epochGradeDate) - yahooNumber(a.epochGradeDate))
-      .find((item) => yahooText(item.firm) || yahooText(item.toGrade));
+      .filter((item) => yahooText(item.firm) || yahooText(item.toGrade));
+    const latestAction = latestActions[0];
 
     const recommendation = yahooText(financialData.recommendationKey);
     const meanRating = yahooNumber(financialData.recommendationMean);
@@ -751,37 +828,79 @@ async function fetchAnalystReview(stock) {
       throw new Error("No analyst summary available");
     }
 
-    return {
-      symbol: stock.symbol,
-      name: stock.name,
-      recommendation,
-      meanRating: formatNumber(meanRating),
-      analystCount: Number.isFinite(analystCount) ? analystCount : null,
-      targetMeanPrice: formatNumber(targetMeanPrice),
-      targetHighPrice: formatNumber(yahooNumber(financialData.targetHighPrice)),
-      targetLowPrice: formatNumber(yahooNumber(financialData.targetLowPrice)),
-      firm,
-      action: yahooText(latestAction?.action),
-      fromGrade: yahooText(latestAction?.fromGrade),
-      toGrade,
-      latestActionDate: yahooNumber(latestAction?.epochGradeDate)
-        ? new Date(yahooNumber(latestAction.epochGradeDate) * 1000).toISOString()
-        : null,
-      source: "Yahoo Finance"
-    };
+    if (!reviews.some((item) => item.kind === "consensus")) {
+      reviews.push({
+        symbol: stock.symbol,
+        name: stock.name,
+        kind: "consensus",
+        firm: "Analyst consensus",
+        title: `${stock.symbol} ${recommendation || "analyst"} consensus`,
+        recommendation,
+        meanRating: formatNumber(meanRating),
+        analystCount: Number.isFinite(analystCount) ? analystCount : null,
+        targetMeanPrice: formatNumber(targetMeanPrice),
+        targetHighPrice: formatNumber(yahooNumber(financialData.targetHighPrice)),
+        targetLowPrice: formatNumber(yahooNumber(financialData.targetLowPrice)),
+        action: yahooText(latestAction?.action),
+        fromGrade: yahooText(latestAction?.fromGrade),
+        toGrade,
+        latestActionDate: yahooNumber(latestAction?.epochGradeDate)
+          ? new Date(yahooNumber(latestAction.epochGradeDate) * 1000).toISOString()
+          : null,
+        source: "Yahoo Finance"
+      });
+    }
+
+    latestActions.slice(0, 4).forEach((action) => {
+      reviews.push({
+        symbol: stock.symbol,
+        name: stock.name,
+        kind: "firm",
+        firm: yahooText(action.firm),
+        action: yahooText(action.action),
+        fromGrade: yahooText(action.fromGrade),
+        toGrade: yahooText(action.toGrade),
+        title: `${yahooText(action.firm)} ${yahooText(action.action) || "rated"} ${stock.symbol}${yahooText(action.toGrade) ? ` ${yahooText(action.toGrade)}` : ""}`,
+        latestActionDate: yahooNumber(action.epochGradeDate)
+          ? new Date(yahooNumber(action.epochGradeDate) * 1000).toISOString()
+          : null,
+        targetMeanPrice: formatNumber(targetMeanPrice) || targetOverview?.priceTarget,
+        targetHighPrice: formatNumber(yahooNumber(financialData.targetHighPrice)),
+        targetLowPrice: formatNumber(yahooNumber(financialData.targetLowPrice)),
+        targetType: formatNumber(targetMeanPrice) ? "Firm target" : "Consensus target",
+        source: "Yahoo Finance"
+      });
+    });
   } catch (error) {
-    const query = encodeURIComponent(`${stock.symbol} ${stock.name} stock analyst rating price target when:14d`);
-    const url = `https://news.google.com/rss/search?q=${query}&hl=en-US&gl=US&ceid=US:en`;
-    const xml = await fetchText(url);
-    const item = parseRss(xml, stock.symbol)[0];
-    if (!item) return null;
-    return {
+    // Analyst endpoints are often rate-limited; the RSS path still surfaces firm notes and targets.
+  }
+
+  const query = encodeURIComponent(`${stock.symbol} ${stock.name} stock analyst price target raised lowered upgrade downgrade when:30d`);
+  const url = `https://news.google.com/rss/search?q=${query}&hl=en-US&gl=US&ceid=US:en`;
+  const xml = await fetchText(url);
+  const rssReviews = parseRss(xml, stock.symbol)
+    .map((item) => ({
       ...item,
       name: stock.name,
+      kind: "firm",
+      firm: inferAnalystFirm(item),
+      action: inferAnalystAction(item.title),
+      targetMeanPrice: formatNumber(extractPriceTarget(item.title)) || targetOverview?.priceTarget,
+      targetType: Number.isFinite(extractPriceTarget(item.title)) ? "Firm target" : "Consensus target",
       recommendation: "Analyst Review",
       source: item.source || "Google News"
-    };
-  }
+    }))
+    .filter((item) => Number.isFinite(item.targetMeanPrice) || /target|upgrade|downgrade|rating|analyst/i.test(item.title));
+
+  const seenFirms = new Set(reviews.map((item) => `${item.symbol}:${item.firm}`.toLowerCase()));
+  rssReviews.forEach((item) => {
+    const key = `${item.symbol}:${item.firm}`.toLowerCase();
+    if (seenFirms.has(key)) return;
+    seenFirms.add(key);
+    reviews.push(item);
+  });
+
+  return reviews.slice(0, 6);
 }
 
 function dateForUrl(date) {
@@ -939,7 +1058,7 @@ async function collectNews(force = false) {
       const xml = await fetchText(url);
       return parseRss(xml, stock.symbol);
     }));
-    const reviewResults = await Promise.allSettled(STOCKS.map(fetchAnalystReview));
+    const reviewResults = await Promise.allSettled(STOCKS.map(fetchAnalystReviews));
 
     let newsFailureCount = 0;
     const news = newsResults.flatMap((result, index) => {
@@ -955,7 +1074,7 @@ async function collectNews(force = false) {
         state.errors.push(`${STOCKS[index].symbol} analyst reviews: ${result.reason.message}`);
         return [];
       }
-      return result.value ? [result.value] : [];
+      return result.value || [];
     });
 
     const seen = new Set();
