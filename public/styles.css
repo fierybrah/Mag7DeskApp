@@ -816,6 +816,101 @@ tr:last-child td {
   gap: 12px;
 }
 
+.analyst-review-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.analyst-review-card {
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+  box-shadow: var(--shadow);
+}
+
+.analyst-review-card header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.analyst-review-card header strong,
+.review-target strong {
+  display: block;
+  color: var(--ink);
+}
+
+.analyst-review-card header span:last-child,
+.review-symbol,
+.review-target span,
+.analyst-review-card dt,
+.analyst-review-card p,
+.review-source {
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.review-symbol {
+  display: block;
+  margin-bottom: 3px;
+  font-weight: 800;
+  letter-spacing: 0;
+}
+
+.review-target {
+  margin: 16px 0 12px;
+}
+
+.review-target strong {
+  margin-top: 2px;
+  font-size: 1.65rem;
+}
+
+.analyst-review-card dl {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin: 0;
+}
+
+.analyst-review-card dt,
+.analyst-review-card dd {
+  margin: 0;
+}
+
+.analyst-review-card dd {
+  margin-top: 2px;
+  color: var(--ink);
+  font-size: 0.88rem;
+  font-weight: 800;
+}
+
+.analyst-review-card p {
+  margin: 12px 0 0;
+  line-height: 1.4;
+}
+
+.analyst-review-card a {
+  display: block;
+  margin-top: 14px;
+  color: var(--ink);
+  font-weight: 800;
+  line-height: 1.35;
+  text-decoration: none;
+}
+
+.analyst-review-card a:hover {
+  color: var(--blue);
+}
+
+.review-source {
+  margin-top: 10px;
+}
+
 .news-item {
   padding: 16px;
   border: 1px solid var(--line);
@@ -885,6 +980,7 @@ tr:last-child td {
   .summary-grid,
   .story-grid,
   .leader-strip,
+  .analyst-review-grid,
   .news-list,
   .technical-workspace {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -930,6 +1026,7 @@ tr:last-child td {
   .story-grid,
   .leader-strip,
   .stock-grid,
+  .analyst-review-grid,
   .news-list,
   .technical-workspace,
   .profile-grid,

@@ -41,6 +41,7 @@ const els = {
   historyReadout: document.querySelector("#historyReadout"),
   profileGrid: document.querySelector("#profileGrid"),
   statsGrid: document.querySelector("#statsGrid"),
+  analystReviews: document.querySelector("#analystReviews"),
   newsList: document.querySelector("#newsList"),
   errorPanel: document.querySelector("#errorPanel"),
 };
@@ -75,6 +76,14 @@ function number(value) {
 function plainNumber(value) {
   if (!Number.isFinite(value)) return "--";
   return new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 }).format(value);
+}
+
+function titleCase(value) {
+  return String(value || "")
+    .split(/[\s_-]+/)
+    .filter(Boolean)
+    .map((word) => `${word.charAt(0).toUpperCase()}${word.slice(1).toLowerCase()}`)
+    .join(" ");
 }
 
 function dateTime(value) {
@@ -818,10 +827,52 @@ function renderTechnicalWorkspace() {
 function renderNews() {
   const visibleStocks = filteredStocks();
   const symbols = new Set(visibleStocks.map((stock) => stock.symbol));
+  const reviews = (state.data?.analystReviews || []).filter((item) => {
+    const matchesSymbol = !symbols.size || symbols.has(item.symbol);
+    return matchesSymbol;
+  });
   const items = (state.data?.news || []).filter((item) => {
     const matchesSymbol = !symbols.size || symbols.has(item.symbol);
     return matchesSymbol;
   });
+
+  els.analystReviews.innerHTML = reviews.length
+    ? reviews.slice(0, 7).map((item) => {
+      const recommendation = titleCase(item.recommendation || item.toGrade || "Analyst Review");
+      const rating = Number.isFinite(item.meanRating) ? `${number(item.meanRating)} avg` : "Consensus";
+      const target = Number.isFinite(item.targetMeanPrice) ? money(item.targetMeanPrice) : "--";
+      const latestAction = [item.firm, item.action ? titleCase(item.action) : "", item.toGrade].filter(Boolean).join(" · ");
+      const range = Number.isFinite(item.targetLowPrice) && Number.isFinite(item.targetHighPrice)
+        ? `${money(item.targetLowPrice)}-${money(item.targetHighPrice)}`
+        : "Target range unavailable";
+      const reviewSummary = item.link
+        ? `<a href="${item.link}" target="_blank" rel="noreferrer">${item.title}</a>`
+        : `<p>${latestAction || "No recent firm action reported"}${item.latestActionDate ? ` · ${dateTime(item.latestActionDate)}` : ""}</p>`;
+      return `
+        <article class="analyst-review-card">
+          <header>
+            <div>
+              <span class="review-symbol">${item.symbol}</span>
+              <strong>${recommendation}</strong>
+            </div>
+            <span>${rating}</span>
+          </header>
+          ${item.link ? "" : `
+            <div class="review-target">
+              <span>Mean target</span>
+              <strong>${target}</strong>
+            </div>
+            <dl>
+              <div><dt>Analysts</dt><dd>${plainNumber(item.analystCount)}</dd></div>
+              <div><dt>Range</dt><dd>${range}</dd></div>
+            </dl>
+          `}
+          ${reviewSummary}
+          <div class="review-source">${item.source || "Market data"}${item.published ? ` · ${dateTime(item.published)}` : ""}</div>
+        </article>
+      `;
+    }).join("")
+    : `<div class="empty">Top analyst reviews are still loading.</div>`;
 
   if (items.length) {
     els.newsList.innerHTML = items.map((item) => `
