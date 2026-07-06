@@ -609,6 +609,21 @@ function parseAlpacaCandles(payload) {
   })).filter((row) => [row.open, row.high, row.low, row.close].every(Number.isFinite));
 }
 
+function parseAlpacaHistoryRows(payload) {
+  return parseAlpacaCandles(payload).map((row) => ({
+    date: new Intl.DateTimeFormat("en-US", {
+      month: "2-digit",
+      day: "2-digit",
+      year: "numeric"
+    }).format(new Date(row.time)),
+    close: row.close,
+    volume: row.volume,
+    open: row.open,
+    high: row.high,
+    low: row.low
+  }));
+}
+
 function compactCandles(candles, maxPoints = 1600) {
   if (candles.length <= maxPoints) return candles;
   const groupSize = Math.ceil(candles.length / maxPoints);
@@ -1094,7 +1109,104 @@ async function fetchYahooStock(stock) {
   };
 }
 
+async function fetchAlpacaStock(stock) {
+  const today = marketDate();
+  const dailyParams = new URLSearchParams({
+    timeframe: "1Day",
+    start: alpacaStartForPeriod("oneYear"),
+    end: new Date().toISOString(),
+    adjustment: "all",
+    feed: "iex",
+    limit: "10000",
+    sort: "asc"
+  });
+  const [dailyPayload, intradayCandles] = await Promise.all([
+    fetchAlpacaJson(`https://data.alpaca.markets/v2/stocks/${stock.symbol}/bars?${dailyParams}`),
+    fetchAlpacaCandles(stock.symbol, "day", "5m")
+  ]);
+  const historyRows = parseAlpacaHistoryRows(dailyPayload);
+  if (!historyRows.length) throw new Error("Alpaca returned no daily bars");
+
+  const latestDaily = historyRows.at(-1) || {};
+  const previousDaily = historyRows.at(-2) || {};
+  const latestIntraday = intradayCandles.at(-1);
+  const price = latestIntraday?.close ?? latestDaily.close;
+  const previousClose = previousDaily.close;
+  const change = Number.isFinite(price) && Number.isFinite(previousClose) ? price - previousClose : null;
+  const changePercent = Number.isFinite(change) && Number.isFinite(previousClose) && previousClose !== 0
+    ? (change / previousClose) * 100
+    : null;
+  const dayHigh = intradayCandles.length
+    ? Math.max(...intradayCandles.map((candle) => candle.high).filter(Number.isFinite))
+    : latestDaily.high;
+  const dayLow = intradayCandles.length
+    ? Math.min(...intradayCandles.map((candle) => candle.low).filter(Number.isFinite))
+    : latestDaily.low;
+  const fiftyTwoWeekHigh = Math.max(...historyRows.map((row) => row.high).filter(Number.isFinite));
+  const fiftyTwoWeekLow = Math.min(...historyRows.map((row) => row.low).filter(Number.isFinite));
+  const volume = intradayCandles.length
+    ? intradayCandles.reduce((total, candle) => total + (candle.volume || 0), 0)
+    : latestDaily.volume;
+  const averageVolume = average(historyRows.slice(-20).map((row) => row.volume));
+
+  return {
+    ...stock,
+    price: formatNumber(price),
+    change: formatNumber(change),
+    changePercent: formatNumber(changePercent),
+    marketCap: null,
+    pe: null,
+    eps: null,
+    dividendYield: null,
+    open: formatNumber(intradayCandles[0]?.open ?? latestDaily.open),
+    bid: null,
+    ask: null,
+    dayLow: formatNumber(dayLow),
+    dayHigh: formatNumber(dayHigh),
+    fiftyTwoWeekLow: formatNumber(fiftyTwoWeekLow),
+    fiftyTwoWeekHigh: formatNumber(fiftyTwoWeekHigh),
+    volume,
+    averageVolume: formatNumber(averageVolume),
+    exchange: "Alpaca IEX",
+    marketState: "Ready",
+    previousClose: formatNumber(previousClose),
+    technicals: calculateTechnicals(historyRows),
+    candles: {
+      fiveMinute: intradayCandles.slice(-90),
+      fifteenMinute: aggregateCandles(intradayCandles, 3).slice(-90),
+      thirtyMinute: aggregateCandles(intradayCandles, 6).slice(-90)
+    },
+    history: buildHistoricalRanges(historyRows),
+    stats: {
+      bid: null,
+      ask: null,
+      volume,
+      averageVolume: formatNumber(averageVolume),
+      open: formatNumber(intradayCandles[0]?.open ?? latestDaily.open),
+      dayHigh: formatNumber(dayHigh),
+      dayLow: formatNumber(dayLow),
+      marketCap: null,
+      fiftyTwoWeekHigh: formatNumber(fiftyTwoWeekHigh),
+      fiftyTwoWeekLow: formatNumber(fiftyTwoWeekLow),
+      pe: null,
+      eps: null,
+      dividendYield: null,
+      previousClose: formatNumber(previousClose)
+    },
+    series: historyRows.map((row) => row.close).filter(Number.isFinite).slice(-80).map((value) => formatNumber(value)),
+    source: "Alpaca"
+  };
+}
+
 async function fetchStock(stock) {
+  if (ALPACA_API_KEY && ALPACA_API_SECRET) {
+    try {
+      return await fetchAlpacaStock(stock);
+    } catch (alpacaError) {
+      // Fall through to public sources so a temporary Alpaca issue does not blank the dashboard.
+    }
+  }
+
   try {
     return await fetchNasdaqStock(stock);
   } catch (error) {
@@ -1128,8 +1240,10 @@ async function collectSnapshot() {
     const stockResults = await Promise.allSettled(STOCKS.map(fetchStock));
     const stockRows = stockResults.map((result, index) => {
       if (result.status === "fulfilled") return result.value;
+      const previousStock = previousStockMap.get(STOCKS[index].symbol);
+      if (previousStock) return previousStock;
       state.errors.push(`${STOCKS[index].symbol} market data: ${result.reason.message}`);
-      return previousStockMap.get(STOCKS[index].symbol) || fallbackStock(STOCKS[index]);
+      return fallbackStock(STOCKS[index]);
     });
 
     state.stocks = stockRows;
