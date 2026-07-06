@@ -44,7 +44,7 @@
           <h2>Prices, signals, and technical detail</h2>
           <p id="marketPulse" class="market-pulse">Loading market pulse.</p>
         </div>
-        <p id="dataSource">Sources: Nasdaq market data and Alpaca chart data</p>
+        <p id="dataSource">Sources: Nasdaq/Yahoo market data and Alpaca chart data</p>
       </section>
 
       <nav class="tabs" aria-label="Dashboard views">
@@ -164,13 +164,19 @@
             <h2>Latest headlines</h2>
           </div>
         </div>
+        <div id="newsStockStrip" class="price-strip news-stock-strip" aria-label="Select stock news"></div>
+        <div class="news-scope" aria-live="polite">
+          <span>Current scope</span>
+          <h3 id="newsScopeTitle">Looking for selected stock news</h3>
+          <p id="newsScopeCopy">Analyst reviews and headlines below follow the selected stock.</p>
+        </div>
         <div id="analystReviews" class="analyst-review-grid"></div>
         <div id="newsList" class="news-list"></div>
       </section>
 
       <footer class="site-footer">
         <span>Mag 7 Stock Desk</span>
-        <span>Nasdaq quotes, Alpaca charts, Google News headlines, and analyst reviews</span>
+        <span>Nasdaq/Yahoo quotes, Alpaca charts, Google News headlines, and analyst reviews</span>
       </footer>
     </main>
 

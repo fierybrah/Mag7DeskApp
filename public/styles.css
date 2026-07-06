@@ -425,6 +425,10 @@ select {
   font-size: 0.78rem;
 }
 
+.news-stock-strip {
+  margin-bottom: 16px;
+}
+
 .price-strip-item.active,
 .stock-card.active {
   border-color: var(--teal);
@@ -814,6 +818,30 @@ tr:last-child td {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
+}
+
+.news-scope {
+  margin: 0 0 16px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.news-scope span {
+  display: block;
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.news-scope h3 {
+  margin: 4px 0;
+  font-size: 1.25rem;
+}
+
+.news-scope p {
+  margin: 0;
+  color: var(--muted);
 }
 
 .analyst-review-grid {
