@@ -46,7 +46,8 @@ function json(res, status, payload) {
 }
 
 function serveFile(req, res) {
-  const requested = req.url === "/" ? "/index.html" : decodeURIComponent(req.url);
+  const pathname = new URL(req.url, `http://${req.headers.host || "localhost"}`).pathname;
+  const requested = pathname === "/" ? "/index.html" : decodeURIComponent(pathname);
   const safePath = path.normalize(requested).replace(/^(\.\.[/\\])+/, "");
   const filePath = path.join(PUBLIC_DIR, safePath);
 
@@ -72,7 +73,10 @@ function serveFile(req, res) {
       ".svg": "image/svg+xml"
     }[ext] || "application/octet-stream";
 
-    res.writeHead(200, { "content-type": type });
+    res.writeHead(200, {
+      "content-type": type,
+      "cache-control": "no-store"
+    });
     res.end(data);
   });
 }
