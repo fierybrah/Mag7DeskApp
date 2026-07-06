@@ -740,7 +740,7 @@ function renderCandleAnalysis(stock) {
   }
 
   const periods = [["day", "1D"], ["week", "1W"], ["threeMonth", "3M"]];
-  const intervals = ["5m", "15m", "30m"];
+  const intervals = ["5m", "15m", "30m", "4h"];
   const cards = periods.flatMap(([period, periodLabel]) => intervals.map((interval) => {
     const key = candleKey(stock.symbol, period, interval);
     const data = state.candleData[key];
