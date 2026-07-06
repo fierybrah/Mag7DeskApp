@@ -330,6 +330,10 @@ function parseNumber(value) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+function isRateLimitError(error) {
+  return /429|too many requests|rate limit/i.test(error?.message || String(error || ""));
+}
+
 function calculateRsi(closes, period = 14) {
   const clean = closes.filter((value) => Number.isFinite(value));
   if (clean.length <= period) return null;
@@ -460,7 +464,8 @@ function alpacaTimeframe(interval) {
   return {
     "5m": "5Min",
     "15m": "15Min",
-    "30m": "30Min"
+    "30m": "30Min",
+    "4h": "4Hour"
   }[interval];
 }
 
@@ -737,7 +742,7 @@ async function fetchDetailedCandles(symbol, period, interval) {
   const stock = STOCKS.find((item) => item.symbol === symbol);
   if (!stock) throw new Error("Unsupported symbol");
   if (!["day", "week", "threeMonth", "sixMonth", "oneYear", "all"].includes(period)) throw new Error("Unsupported period");
-  if (!["5m", "15m", "30m"].includes(interval)) throw new Error("Unsupported interval");
+  if (!["5m", "15m", "30m", "4h"].includes(interval)) throw new Error("Unsupported interval");
 
   const range = yahooRangeForPeriod(period);
   const provider = ALPACA_API_KEY && ALPACA_API_SECRET ? "alpaca" : "yahoo";
@@ -751,10 +756,12 @@ async function fetchDetailedCandles(symbol, period, interval) {
   const response = provider === "alpaca"
     ? await fetchAlpacaCandles(symbol, period, interval)
     : await (async () => {
-      const url = `https://query2.finance.yahoo.com/v8/finance/chart/${symbol}?range=${range}&interval=${interval}&includePrePost=false`;
+      const yahooInterval = interval === "4h" ? "1h" : interval;
+      const url = `https://query2.finance.yahoo.com/v8/finance/chart/${symbol}?range=${range}&interval=${yahooInterval}&includePrePost=false`;
       const payload = await fetchYahooJson(url);
       const providerError = payload?.chart?.error?.description;
       if (providerError) throw new Error(providerError);
+      const sourceCandles = parseYahooCandles(payload);
       return {
         symbol,
         period,
@@ -762,7 +769,7 @@ async function fetchDetailedCandles(symbol, period, interval) {
         effectiveRange: range,
         source: "Yahoo Finance",
         note: candleLimitNote(period, interval),
-        candles: parseYahooCandles(payload)
+        candles: interval === "4h" ? aggregateCandles(sourceCandles, 4) : sourceCandles
       };
     })();
   state.candleCache.set(cacheKey, { cachedAt: Date.now(), payload: response });
@@ -1199,10 +1206,12 @@ async function fetchAlpacaStock(stock) {
 }
 
 async function fetchStock(stock) {
+  let alpacaError = null;
   if (ALPACA_API_KEY && ALPACA_API_SECRET) {
     try {
       return await fetchAlpacaStock(stock);
-    } catch (alpacaError) {
+    } catch (error) {
+      alpacaError = error;
       // Fall through to public sources so a temporary Alpaca issue does not blank the dashboard.
     }
   }
@@ -1210,7 +1219,17 @@ async function fetchStock(stock) {
   try {
     return await fetchNasdaqStock(stock);
   } catch (error) {
-    return fetchYahooStock(stock);
+    try {
+      return await fetchYahooStock(stock);
+    } catch (fallbackError) {
+      if (isRateLimitError(error) || isRateLimitError(fallbackError)) {
+        return {
+          ...fallbackStock(stock),
+          source: alpacaError ? "Alpaca unavailable; public providers rate-limited" : "Public providers rate-limited"
+        };
+      }
+      throw fallbackError;
+    }
   }
 }
 
