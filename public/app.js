@@ -742,15 +742,15 @@ function renderEntryAnalysis() {
         </ul>
         <details class="entry-rules">
           <summary>Scoring rules</summary>
-          <div class="entry-rules-grid">
-            <span>Price above/below SMA 20</span><strong>+8 / -8</strong>
-            <span>Price above/below SMA 50</span><strong>+8 / -8</strong>
-            <span>SMA 20 above/below SMA 50</span><strong>+7 / -7</strong>
-            <span>RSI 45-65, above 72, below 35</span><strong>+8 / -8 / -4</strong>
-            <span>Volume ratio at least 1.1x</span><strong>+5</strong>
-            <span>4h candle bullish/bearish pattern</span><strong>+10 / -10</strong>
-            <span>Positive/negative sentiment</span><strong>+8 / -8</strong>
-            <span>Analyst target upside/downside</span><strong>+8 / -8</strong>
+          <div class="entry-rules-table">
+            <div><span>Price vs SMA 20</span><strong>+8 / -8</strong><p>Short/intermediate trend filter; meaningful, but not dominant.</p></div>
+            <div><span>Price vs SMA 50</span><strong>+8 / -8</strong><p>Broader trend filter; weighted equally with SMA 20 to avoid over-concentration.</p></div>
+            <div><span>SMA 20 vs SMA 50</span><strong>+7 / -7</strong><p>Confirms trend structure, but changes slowly, so it is slightly lighter.</p></div>
+            <div><span>RSI 14</span><strong>+8 / -8 / -4</strong><p>Rewards constructive momentum, penalizes extended entries, and lightly penalizes weak/oversold setups.</p></div>
+            <div><span>Volume</span><strong>+5</strong><p>Above-average volume confirms participation, but volume is noisy, so it stays supportive.</p></div>
+            <div><span>4h candle pattern</span><strong>+10 / -10</strong><p>Largest single weight because 4h structure is central to entry timing.</p></div>
+            <div><span>Sentiment</span><strong>+8 / -8</strong><p>News and analyst tone can support or pressure a setup, but should not override price action.</p></div>
+            <div><span>Analyst target</span><strong>+8 / -8</strong><p>Meaningful upside/downside adds valuation context, while avoiding tiny target gaps.</p></div>
           </div>
           <p>Score starts at 50 and is clamped from 0 to 100. This is a transparent rule-based setup score, not a z-score or machine-learning prediction.</p>
         </details>

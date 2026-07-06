@@ -556,6 +556,13 @@ select {
   padding: 0 12px 12px;
 }
 
+.entry-rules-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px 14px;
+  padding: 0 12px 12px;
+}
+
 .entry-rules-table div {
   padding: 10px;
   border: 1px solid var(--line);
@@ -564,6 +571,7 @@ select {
 }
 
 .entry-rules-table span,
+.entry-rules-grid span,
 .entry-rules p {
   color: var(--muted);
   font-size: 0.86rem;
@@ -576,6 +584,11 @@ select {
 
 .entry-rules-table strong {
   margin: 3px 0 5px;
+}
+
+.entry-rules-grid strong {
+  text-align: right;
+  white-space: nowrap;
 }
 
 .entry-rules p {
@@ -1224,7 +1237,8 @@ tr:last-child td {
   .profile-grid,
   .stats-grid,
   .entry-grid,
-  .entry-rules-table {
+  .entry-rules-table,
+  .entry-rules-grid {
     grid-template-columns: 1fr;
   }
 
