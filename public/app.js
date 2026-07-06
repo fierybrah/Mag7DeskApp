@@ -43,6 +43,8 @@ const els = {
   profileGrid: document.querySelector("#profileGrid"),
   statsGrid: document.querySelector("#statsGrid"),
   analystReviews: document.querySelector("#analystReviews"),
+  newsScopeTitle: document.querySelector("#newsScopeTitle"),
+  newsScopeCopy: document.querySelector("#newsScopeCopy"),
   newsList: document.querySelector("#newsList"),
   errorPanel: document.querySelector("#errorPanel"),
 };
@@ -833,6 +835,13 @@ function renderNews() {
   const selectedStock = selectedTechnicalStock();
   const selectedSymbol = selectedStock?.symbol;
   renderPriceStrip(stocks, els.newsStockStrip, false);
+  if (selectedStock) {
+    els.newsScopeTitle.textContent = `Looking for ${selectedStock.symbol} news and analyst reviews`;
+    els.newsScopeCopy.textContent = `${selectedStock.name} is the active stock in scope for the analyst reviews, price targets, and headlines below.`;
+  } else {
+    els.newsScopeTitle.textContent = "Looking for selected stock news";
+    els.newsScopeCopy.textContent = "Analyst reviews and headlines below follow the selected stock.";
+  }
 
   const reviews = (state.data?.analystReviews || []).filter((item) => item.symbol === selectedSymbol);
   const items = (state.data?.news || []).filter((item) => item.symbol === selectedSymbol);
