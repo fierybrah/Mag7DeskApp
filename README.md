@@ -76,6 +76,130 @@ It includes:
 - Firm/source review notes from analyst-related headlines.
 - Google News headline feed for the selected stock.
 
+## How The App Fits Together
+
+The app has one Node backend and one static browser frontend.
+
+High-level flow:
+
+```text
+server.js
+  serves public/index.html, public/styles.css, public/app.js
+  exposes /api/snapshot, /api/candles, /api/refresh, /health
+
+browser
+  loads index.html
+  loads styles.css
+  loads app.js
+  app.js calls backend APIs
+  app.js renders Entry Analysis, Technicals, and News
+```
+
+### Architecture Diagram
+
+```mermaid
+flowchart TD
+  User[User opens app URL] --> Server[server.js Node server]
+  Server --> HTML[public/index.html]
+  HTML --> CSS[public/styles.css]
+  HTML --> JS[public/app.js]
+
+  JS --> Snapshot[/GET /api/snapshot/]
+  JS --> Candles[/GET /api/candles/]
+  JS --> Refresh[/POST /api/refresh/]
+  JS --> Health[/GET /health/]
+
+  Snapshot --> Server
+  Candles --> Server
+  Refresh --> Server
+  Health --> Server
+
+  Server --> Alpaca[Alpaca market data]
+  Server --> Nasdaq[Nasdaq public data]
+  Server --> Yahoo[Yahoo Finance chart data]
+  Server --> GoogleNews[Google News RSS]
+
+  Alpaca --> Server
+  Nasdaq --> Server
+  Yahoo --> Server
+  GoogleNews --> Server
+
+  Server --> JSON[JSON API responses]
+  JSON --> JS
+
+  JS --> Entry[Entry Analysis tab]
+  JS --> Technicals[Technicals tab]
+  JS --> News[News tab]
+```
+
+### File Responsibilities
+
+| File | Role |
+| --- | --- |
+| `server.js` | Backend data engine and HTTP server. Fetches market data, candles, news, and analyst context. Serves the frontend and exposes API routes. |
+| `public/index.html` | Page skeleton. Defines the tab structure, panels, placeholders, chart canvases, and script/style references. |
+| `public/app.js` | Frontend logic. Fetches API data, manages state, switches tabs, syncs stock selectors, calculates Entry Analysis, renders news/reviews, and draws charts. |
+| `public/styles.css` | Visual layer. Controls layout, cards, tabs, responsive behavior, Entry Analysis styling, chart panels, News cards, and the scoring rules drawer. |
+| `README.md` | Project documentation. Explains usage, setup, deployment, APIs, scoring rules, and troubleshooting. It is not loaded by the running app. |
+| `package.json` | Node project metadata and scripts. `npm start` depends on this file because it runs `node server.js`. |
+| `render.yaml` | Render deployment configuration. Defines build/start commands, health check path, and default environment variables. |
+| `Dockerfile` | Optional container deployment definition. Builds a Node image and starts the app with `npm start`. |
+| `.dockerignore` | Optional Docker helper. Excludes unnecessary files from Docker image builds. |
+
+### Runtime Request Flow
+
+1. A user opens the app URL.
+2. `server.js` serves `public/index.html`.
+3. The browser loads `public/styles.css` and `public/app.js`.
+4. `public/app.js` calls:
+
+```text
+GET /api/snapshot
+```
+
+5. `server.js` returns stock rows, news items, analyst reviews, timestamps, and error metadata.
+6. `public/app.js` renders:
+
+- Entry Analysis
+- Technicals
+- News
+
+7. When the user changes candle period or interval, `public/app.js` calls:
+
+```text
+GET /api/candles?symbol=GOOGL&period=week&interval=4h
+```
+
+8. `server.js` returns detailed candle data.
+9. `public/app.js` redraws the candlestick chart and updates pattern analysis.
+
+### Deployment File Requirements
+
+For a normal Node deployment, these files are required:
+
+```text
+server.js
+package.json
+public/index.html
+public/app.js
+public/styles.css
+```
+
+For Render deployment, include:
+
+```text
+render.yaml
+```
+
+For Docker deployment, include:
+
+```text
+Dockerfile
+.dockerignore
+```
+
+If `package.json` is missing, most hosts will not know how to run `npm start`. If `public/app.js` or `public/styles.css` is missing or stale, the server may start but the browser UI can look broken or behave like an older version.
+
 ## Data Sources
 
 The app uses several data sources with fallback behavior:
