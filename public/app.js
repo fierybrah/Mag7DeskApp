@@ -1,6 +1,6 @@
 const state = {
   data: null,
-  view: "market",
+  view: "entry",
   technicalSymbol: "GOOGL",
   candlePeriod: "week",
   candleInterval: "5m",
@@ -24,6 +24,8 @@ const els = {
   avgMove: document.querySelector("#avgMove"),
   nextRefresh: document.querySelector("#nextRefresh"),
   marketPulse: document.querySelector("#marketPulse"),
+  entryStockStrip: document.querySelector("#entryStockStrip"),
+  entryAnalysis: document.querySelector("#entryAnalysis"),
   priceStrip: document.querySelector("#priceStrip"),
   newsStockStrip: document.querySelector("#newsStockStrip"),
   selectedSignalHint: document.querySelector("#selectedSignalHint"),
@@ -74,6 +76,16 @@ function percent(value) {
 function number(value) {
   if (!Number.isFinite(value)) return "--";
   return new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 }).format(value);
+}
+
+function clamp(value, min, max) {
+  return Math.max(min, Math.min(max, value));
+}
+
+function average(values) {
+  const valid = values.filter(Number.isFinite);
+  if (!valid.length) return null;
+  return valid.reduce((sum, value) => sum + value, 0) / valid.length;
 }
 
 function plainNumber(value) {
@@ -133,6 +145,7 @@ async function loadDetailedCandles(symbol, period = state.candlePeriod, interval
     state.candleLoadingKeys.delete(key);
     if (symbol === state.technicalSymbol) {
       renderTechnicalWorkspace();
+      renderEntryAnalysis();
     }
   }
 }
@@ -526,8 +539,10 @@ function selectStock(symbol, scrollToDetail = true) {
   state.technicalSymbol = symbol;
   state.candleZoom = 1;
   state.candlePan = 0;
+  renderPriceStrip(filteredStocks(), els.entryStockStrip, false);
   renderPriceStrip(filteredStocks());
   renderPriceStrip(filteredStocks(), els.newsStockStrip, false);
+  renderEntryAnalysis();
   renderTechnicalWorkspace();
   renderNews();
   if (scrollToDetail) {
@@ -538,6 +553,194 @@ function selectStock(symbol, scrollToDetail = true) {
 function selectedTechnicalStock() {
   const stocks = state.data?.stocks || [];
   return stocks.find((stock) => stock.symbol === state.technicalSymbol) || stocks[0] || null;
+}
+
+function sentimentForStock(symbol) {
+  const textItems = [
+    ...(state.data?.news || []).filter((item) => item.symbol === symbol),
+    ...(state.data?.analystReviews || []).filter((item) => item.symbol === symbol)
+  ];
+  const positiveWords = ["upgrade", "raised", "raise", "boost", "beat", "bullish", "buy", "outperform", "strong", "rally", "upside"];
+  const negativeWords = ["downgrade", "lowered", "cut", "miss", "bearish", "sell", "underperform", "weak", "lawsuit", "probe", "slump"];
+  let score = 0;
+  textItems.forEach((item) => {
+    const text = `${item.title || ""} ${item.action || ""} ${item.recommendation || ""}`.toLowerCase();
+    positiveWords.forEach((word) => {
+      if (text.includes(word)) score += 1;
+    });
+    negativeWords.forEach((word) => {
+      if (text.includes(word)) score -= 1;
+    });
+  });
+  const label = score >= 3 ? "Positive" : score <= -3 ? "Negative" : "Mixed";
+  return { score, label, count: textItems.length };
+}
+
+function analystTargetForStock(symbol) {
+  const reviews = (state.data?.analystReviews || []).filter((item) => item.symbol === symbol);
+  const consensus = reviews.find((item) => item.kind === "consensus" && Number.isFinite(item.targetMeanPrice));
+  if (consensus) return consensus.targetMeanPrice;
+  const targets = reviews.map((item) => item.targetMeanPrice).filter(Number.isFinite);
+  return targets.length ? average(targets) : null;
+}
+
+function entryAnalysisForStock(stock) {
+  const price = stock?.price;
+  if (!stock || !Number.isFinite(price)) {
+    return {
+      score: 0,
+      bias: "Unavailable",
+      quality: "Unavailable",
+      setup: "Waiting for market data",
+      entryZone: "--",
+      invalidation: "--",
+      target: "--",
+      riskReward: "--",
+      sentiment: "Unavailable",
+      reasons: ["Market data is not available for this symbol yet."]
+    };
+  }
+
+  const reasons = [];
+  let score = 50;
+  const sma20 = stock.technicals?.sma20;
+  const sma50 = stock.technicals?.sma50;
+  const rsi = stock.technicals?.rsi14;
+  const volumeRatio = stock.technicals?.volumeRatio;
+  const target = analystTargetForStock(stock.symbol);
+  const sentiment = sentimentForStock(stock.symbol);
+  const fourHourKey = candleKey(stock.symbol, "week", "4h");
+  const fourHourData = state.candleData[fourHourKey];
+
+  if (!fourHourData && !state.candleLoadingKeys.has(fourHourKey)) {
+    loadDetailedCandles(stock.symbol, "week", "4h");
+  }
+
+  if (Number.isFinite(sma20) && price > sma20) {
+    score += 8;
+    reasons.push("Price is above the 20-day SMA.");
+  } else if (Number.isFinite(sma20)) {
+    score -= 8;
+    reasons.push("Price is below the 20-day SMA.");
+  }
+
+  if (Number.isFinite(sma50) && price > sma50) {
+    score += 8;
+    reasons.push("Price is above the 50-day SMA.");
+  } else if (Number.isFinite(sma50)) {
+    score -= 8;
+    reasons.push("Price is below the 50-day SMA.");
+  }
+
+  if (Number.isFinite(sma20) && Number.isFinite(sma50) && sma20 > sma50) {
+    score += 7;
+    reasons.push("The medium-term trend is constructive.");
+  } else if (Number.isFinite(sma20) && Number.isFinite(sma50)) {
+    score -= 7;
+    reasons.push("The medium-term trend is not confirmed.");
+  }
+
+  if (Number.isFinite(rsi)) {
+    if (rsi >= 45 && rsi <= 65) {
+      score += 8;
+      reasons.push("RSI is in a constructive range.");
+    } else if (rsi > 72) {
+      score -= 8;
+      reasons.push("RSI is extended, so entry risk is higher.");
+    } else if (rsi < 35) {
+      score -= 4;
+      reasons.push("RSI is weak and needs confirmation.");
+    }
+  }
+
+  if (Number.isFinite(volumeRatio) && volumeRatio >= 1.1) {
+    score += 5;
+    reasons.push("Volume is above its recent average.");
+  }
+
+  if (fourHourData?.candles?.length) {
+    const candleSignal = analyseCandlestickPattern(fourHourData.candles);
+    if (candleSignal.signal === "Bullish") score += 10;
+    if (candleSignal.signal === "Bearish") score -= 10;
+    reasons.push(`4h pattern: ${candleSignal.text}`);
+  } else {
+    reasons.push("4h pattern confirmation is still loading.");
+  }
+
+  if (sentiment.label === "Positive") score += 8;
+  if (sentiment.label === "Negative") score -= 8;
+  reasons.push(`${sentiment.label} news and analyst sentiment across ${sentiment.count} scoped items.`);
+
+  if (Number.isFinite(target)) {
+    const upside = ((target - price) / price) * 100;
+    if (upside >= 8) score += 8;
+    else if (upside <= -3) score -= 8;
+    reasons.push(`Analyst target implies ${percent(upside)} from the current price.`);
+  }
+
+  score = Math.round(clamp(score, 0, 100));
+  const bias = score >= 65 ? "Bullish" : score <= 40 ? "Bearish" : "Neutral";
+  const quality = score >= 75 ? "Strong" : score >= 60 ? "Moderate" : score >= 45 ? "Watch" : "Avoid";
+  const setup = bias === "Bullish"
+    ? (Number.isFinite(rsi) && rsi > 68 ? "Momentum watch" : "Pullback or continuation")
+    : bias === "Bearish" ? "Wait for repair" : "Confirmation needed";
+  const entryLow = Number.isFinite(sma20) && bias === "Bullish" ? Math.min(price, sma20 * 1.01) : price * 0.985;
+  const entryHigh = bias === "Bullish" ? price * 1.005 : price * 1.01;
+  const invalidation = Math.min(
+    ...[stock.dayLow, sma50, price * 0.97].filter(Number.isFinite)
+  );
+  const targetPrice = Number.isFinite(target) && target > price ? target : (Number.isFinite(stock.fiftyTwoWeekHigh) ? stock.fiftyTwoWeekHigh : price * 1.05);
+  const risk = price - invalidation;
+  const reward = targetPrice - price;
+  const riskReward = risk > 0 && reward > 0 ? `${number(reward / risk)}:1` : "--";
+
+  return {
+    score,
+    bias,
+    quality,
+    setup,
+    entryZone: bias === "Bearish" ? "Wait for confirmation" : `${money(entryLow)} - ${money(entryHigh)}`,
+    invalidation: money(invalidation),
+    target: money(targetPrice),
+    riskReward,
+    sentiment: sentiment.label,
+    reasons: reasons.slice(0, 5)
+  };
+}
+
+function renderEntryAnalysis() {
+  if (!els.entryAnalysis) return;
+  const stock = selectedTechnicalStock();
+  const analysis = entryAnalysisForStock(stock);
+  const scoreClass = analysis.bias.toLowerCase();
+  els.entryAnalysis.innerHTML = `
+    <article class="entry-panel">
+      <div class="entry-score ${scoreClass}">
+        <span>Setup Quality</span>
+        <strong>${analysis.score}</strong>
+        <b>${analysis.quality}</b>
+      </div>
+      <div class="entry-summary">
+        <div class="panel-head">
+          <div>
+            <span class="panel-label">Entry Analysis</span>
+            <strong>${stock?.symbol || "--"} · ${analysis.bias}</strong>
+          </div>
+          <span class="entry-sentiment">${analysis.sentiment} sentiment</span>
+        </div>
+        <div class="entry-grid">
+          <div><span>Setup</span><strong>${analysis.setup}</strong></div>
+          <div><span>Entry zone</span><strong>${analysis.entryZone}</strong></div>
+          <div><span>Invalidation</span><strong>${analysis.invalidation}</strong></div>
+          <div><span>Target</span><strong>${analysis.target}</strong></div>
+          <div><span>Risk/reward</span><strong>${analysis.riskReward}</strong></div>
+        </div>
+        <ul class="entry-reasons">
+          ${analysis.reasons.map((reason) => `<li>${reason}</li>`).join("")}
+        </ul>
+      </div>
+    </article>
+  `;
 }
 
 function renderStats(stock) {
@@ -921,8 +1124,10 @@ function render() {
   renderSummary(state.data?.stocks || []);
   renderBrief(state.data?.stocks || []);
   renderErrors();
+  renderPriceStrip(stocks, els.entryStockStrip, false);
   renderPriceStrip(stocks);
   renderPriceStrip(stocks, els.newsStockStrip, false);
+  renderEntryAnalysis();
   renderTechnicalWorkspace();
   renderNews();
 }
@@ -935,8 +1140,11 @@ function activateView(view) {
   document.querySelectorAll(".view").forEach((viewEl) => {
     viewEl.classList.toggle("active", viewEl.id === `${view}View`);
   });
-  if (view === "market" && state.data) {
+  if (view === "technicals" && state.data) {
     window.requestAnimationFrame(renderTechnicalWorkspace);
+  }
+  if (view === "entry" && state.data) {
+    window.requestAnimationFrame(renderEntryAnalysis);
   }
 }
 

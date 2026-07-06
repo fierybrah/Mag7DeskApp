@@ -18,7 +18,8 @@
         <span>Stock Desk</span>
       </a>
       <nav class="site-links" aria-label="Site sections">
-        <a href="#dashboard" data-nav-view="market">Market</a>
+        <a href="#dashboard" data-nav-view="entry">Entry Analysis</a>
+        <a href="#technicals" data-nav-view="technicals">Technicals</a>
         <a href="#headlines" data-nav-view="news">Headlines</a>
       </nav>
     </header>
@@ -41,20 +42,21 @@
       <section id="dashboard" class="section-head">
         <div>
           <p class="eyebrow">Live market workspace</p>
-          <h2>Prices, signals, and technical detail</h2>
+          <h2>Entry analysis, technicals, and market context</h2>
           <p id="marketPulse" class="market-pulse">Loading market pulse.</p>
         </div>
         <p id="dataSource">Sources: Alpaca, Nasdaq, and Yahoo market data</p>
       </section>
 
       <nav class="tabs" aria-label="Dashboard views">
-        <button class="tab active" data-view="market" type="button">Market</button>
+        <button class="tab active" data-view="entry" type="button">Entry Analysis</button>
+        <button class="tab" data-view="technicals" type="button">Technicals</button>
         <button class="tab" data-view="news" type="button">News</button>
       </nav>
 
       <section id="errorPanel" class="error-panel hidden" aria-live="polite"></section>
 
-      <section id="marketView" class="view active">
+      <section id="entryView" class="view active">
         <section class="summary-grid" aria-label="Market summary">
           <div class="metric">
             <span>Combined Market Cap</span>
@@ -73,8 +75,13 @@
             <strong id="nextRefresh">--</strong>
           </div>
         </section>
+        <div id="entryStockStrip" class="price-strip" aria-label="Select stock for entry analysis"></div>
+        <section id="entryAnalysis" class="entry-analysis" aria-live="polite"></section>
+      </section>
+
+      <section id="technicalsView" class="view">
         <div id="priceStrip" class="price-strip" aria-label="Live Mag 7 prices"></div>
-        <section id="stockDetail" class="stock-detail" aria-label="Selected stock details">
+        <section id="stockDetail" class="stock-detail" aria-label="Selected stock technical details">
         <div id="signals" class="section-head compact-head">
           <div>
             <p class="eyebrow">Selected stock</p>
