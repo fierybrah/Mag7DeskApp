@@ -549,28 +549,42 @@ select {
   font-weight: 850;
 }
 
-.entry-rules-grid {
+.entry-rules-table {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 8px 14px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
   padding: 0 12px 12px;
 }
 
-.entry-rules-grid span,
+.entry-rules-table div {
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: white;
+}
+
+.entry-rules-table span,
 .entry-rules p {
   color: var(--muted);
   font-size: 0.86rem;
 }
 
-.entry-rules-grid strong {
-  text-align: right;
-  white-space: nowrap;
+.entry-rules-table span,
+.entry-rules-table strong {
+  display: block;
+}
+
+.entry-rules-table strong {
+  margin: 3px 0 5px;
 }
 
 .entry-rules p {
   margin: 0;
-  padding: 0 12px 12px;
   line-height: 1.4;
+}
+
+.entry-rules > p {
+  padding: 0 12px 12px;
 }
 
 .stock-grid {
@@ -1209,7 +1223,8 @@ tr:last-child td {
   .technical-workspace,
   .profile-grid,
   .stats-grid,
-  .entry-grid {
+  .entry-grid,
+  .entry-rules-table {
     grid-template-columns: 1fr;
   }
 
