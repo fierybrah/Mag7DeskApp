@@ -781,6 +781,24 @@ function fallbackDetailedCandles(symbol, period, interval, reason) {
   const setupNote = alpacaConfigured
     ? "Alpaca could not return this selection right now."
     : "This local server does not have the Alpaca environment variables; it is using the public fallback source instead. The Render deployment will use Alpaca after the updated code is deployed.";
+  const intervalKey = {
+    "5m": "fiveMinute",
+    "15m": "fifteenMinute",
+    "30m": "thirtyMinute",
+    "4h": "fourHour"
+  }[interval];
+  const snapshotCandles = state.stocks.find((stock) => stock.symbol === symbol)?.candles?.[intervalKey] || [];
+  if (snapshotCandles.length) {
+    return {
+      symbol,
+      period,
+      interval,
+      effectiveRange: "snapshot",
+      source: "Snapshot candle fallback",
+      note: `${periodLabel(period)} ${interval} provider candles are temporarily unavailable (${reason}). Showing the latest cached ${interval} snapshot candles.`,
+      candles: snapshotCandles
+    };
+  }
   return {
     symbol,
     period,
@@ -1024,7 +1042,8 @@ async function fetchNasdaqStock(stock) {
     candles: {
       fiveMinute: buildCandles(intradayPoints, 5),
       fifteenMinute: buildCandles(intradayPoints, 15),
-      thirtyMinute: buildCandles(intradayPoints, 30)
+      thirtyMinute: buildCandles(intradayPoints, 30),
+      fourHour: aggregateCandles(buildCandles(intradayPoints, 5), 48)
     },
     history: buildHistoricalRanges(historyRows),
     stats: {
@@ -1092,7 +1111,8 @@ async function fetchYahooStock(stock) {
     candles: {
       fiveMinute: intradayCandles.slice(-90),
       fifteenMinute: aggregateCandles(intradayCandles, 3).slice(-90),
-      thirtyMinute: aggregateCandles(intradayCandles, 6).slice(-90)
+      thirtyMinute: aggregateCandles(intradayCandles, 6).slice(-90),
+      fourHour: aggregateCandles(intradayCandles, 48).slice(-90)
     },
     history: buildHistoricalRanges(historyRows),
     stats: {
@@ -1181,7 +1201,8 @@ async function fetchAlpacaStock(stock) {
     candles: {
       fiveMinute: intradayCandles.slice(-90),
       fifteenMinute: aggregateCandles(intradayCandles, 3).slice(-90),
-      thirtyMinute: aggregateCandles(intradayCandles, 6).slice(-90)
+      thirtyMinute: aggregateCandles(intradayCandles, 6).slice(-90),
+      fourHour: aggregateCandles(intradayCandles, 48).slice(-90)
     },
     history: buildHistoricalRanges(historyRows),
     stats: {
@@ -1205,6 +1226,72 @@ async function fetchAlpacaStock(stock) {
   };
 }
 
+function rowsFromCandles(candles) {
+  return (candles || []).map((candle) => ({
+    date: new Intl.DateTimeFormat("en-US", {
+      month: "2-digit",
+      day: "2-digit",
+      year: "numeric"
+    }).format(new Date(candle.time || candle.date)),
+    close: candle.close,
+    volume: candle.volume,
+    open: candle.open,
+    high: candle.high,
+    low: candle.low
+  })).filter((row) => Number.isFinite(row.close));
+}
+
+async function fetchCandleDerivedStock(stock) {
+  const candleData = await fetchDetailedCandles(stock.symbol, "week", "5m");
+  const candles = candleData.candles || [];
+  if (!candles.length) throw new Error(candleData.note || "No fallback candles available");
+
+  const rows = rowsFromCandles(candles);
+  const first = candles[0];
+  const latest = candles.at(-1);
+  const price = latest.close;
+  const previousClose = first.close;
+  const change = Number.isFinite(price) && Number.isFinite(previousClose) ? price - previousClose : null;
+  const changePercent = Number.isFinite(change) && Number.isFinite(previousClose) && previousClose !== 0
+    ? (change / previousClose) * 100
+    : null;
+  const highs = candles.map((candle) => candle.high).filter(Number.isFinite);
+  const lows = candles.map((candle) => candle.low).filter(Number.isFinite);
+  const volume = candles.reduce((total, candle) => total + (candle.volume || 0), 0);
+
+  return {
+    ...fallbackStock(stock),
+    price: formatNumber(price),
+    change: formatNumber(change),
+    changePercent: formatNumber(changePercent),
+    open: formatNumber(first.open),
+    dayLow: lows.length ? formatNumber(Math.min(...lows)) : null,
+    dayHigh: highs.length ? formatNumber(Math.max(...highs)) : null,
+    volume,
+    averageVolume: null,
+    exchange: candleData.source || "",
+    marketState: "Rate-limited snapshot",
+    previousClose: formatNumber(previousClose),
+    technicals: calculateTechnicals(rows),
+    candles: {
+      fiveMinute: candles.slice(-90),
+      fifteenMinute: aggregateCandles(candles, 3).slice(-90),
+      thirtyMinute: aggregateCandles(candles, 6).slice(-90),
+      fourHour: aggregateCandles(candles, 48).slice(-90)
+    },
+    history: buildHistoricalRanges(rows),
+    stats: {
+      volume,
+      open: formatNumber(first.open),
+      dayHigh: highs.length ? formatNumber(Math.max(...highs)) : null,
+      dayLow: lows.length ? formatNumber(Math.min(...lows)) : null,
+      previousClose: formatNumber(previousClose)
+    },
+    series: rows.map((row) => row.close).filter(Number.isFinite).slice(-80).map((value) => formatNumber(value)),
+    source: `${candleData.source || "Candle"} fallback`
+  };
+}
+
 async function fetchStock(stock) {
   let alpacaError = null;
   if (ALPACA_API_KEY && ALPACA_API_SECRET) {
@@ -1223,10 +1310,7 @@ async function fetchStock(stock) {
       return await fetchYahooStock(stock);
     } catch (fallbackError) {
       if (isRateLimitError(error) || isRateLimitError(fallbackError)) {
-        return {
-          ...fallbackStock(stock),
-          source: alpacaError ? "Alpaca unavailable; public providers rate-limited" : "Public providers rate-limited"
-        };
+        return fetchCandleDerivedStock(stock);
       }
       throw fallbackError;
     }
@@ -1377,7 +1461,7 @@ function fallbackStock(stock) {
     exchange: "",
     marketState: "",
     technicals: { sma20: null, sma50: null, rsi14: null, volumeRatio: null, signal: "Unavailable" },
-    candles: { fiveMinute: [], fifteenMinute: [], thirtyMinute: [] },
+    candles: { fiveMinute: [], fifteenMinute: [], thirtyMinute: [], fourHour: [] },
     history: { day: [], week: [], threeMonth: [], sixMonth: [], oneYear: [], all: [] },
     stats: {},
     series: []
