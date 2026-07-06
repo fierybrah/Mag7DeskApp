@@ -497,6 +497,14 @@ select {
   min-width: 0;
 }
 
+.entry-one-line {
+  margin: 10px 0 0;
+  color: var(--ink);
+  font-size: 1.08rem;
+  font-weight: 800;
+  line-height: 1.35;
+}
+
 .entry-grid {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
@@ -524,6 +532,44 @@ select {
   margin: 14px 0 0;
   padding: 0 0 0 18px;
   color: var(--muted);
+  line-height: 1.4;
+}
+
+.entry-rules {
+  margin-top: 16px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-soft);
+}
+
+.entry-rules summary {
+  cursor: pointer;
+  padding: 12px;
+  color: var(--ink);
+  font-weight: 850;
+}
+
+.entry-rules-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px 14px;
+  padding: 0 12px 12px;
+}
+
+.entry-rules-grid span,
+.entry-rules p {
+  color: var(--muted);
+  font-size: 0.86rem;
+}
+
+.entry-rules-grid strong {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.entry-rules p {
+  margin: 0;
+  padding: 0 12px 12px;
   line-height: 1.4;
 }
 

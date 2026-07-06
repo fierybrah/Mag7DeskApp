@@ -699,6 +699,7 @@ function entryAnalysisForStock(stock) {
     bias,
     quality,
     setup,
+    summary: `${quality} ${bias.toLowerCase()} setup: ${setup.toLowerCase()} with ${sentiment.label.toLowerCase()} sentiment.`,
     entryZone: bias === "Bearish" ? "Wait for confirmation" : `${money(entryLow)} - ${money(entryHigh)}`,
     invalidation: money(invalidation),
     target: money(targetPrice),
@@ -728,6 +729,7 @@ function renderEntryAnalysis() {
           </div>
           <span class="entry-sentiment">${analysis.sentiment} sentiment</span>
         </div>
+        <p class="entry-one-line">${analysis.summary}</p>
         <div class="entry-grid">
           <div><span>Setup</span><strong>${analysis.setup}</strong></div>
           <div><span>Entry zone</span><strong>${analysis.entryZone}</strong></div>
@@ -738,6 +740,20 @@ function renderEntryAnalysis() {
         <ul class="entry-reasons">
           ${analysis.reasons.map((reason) => `<li>${reason}</li>`).join("")}
         </ul>
+        <details class="entry-rules">
+          <summary>Scoring rules</summary>
+          <div class="entry-rules-grid">
+            <span>Price above/below SMA 20</span><strong>+8 / -8</strong>
+            <span>Price above/below SMA 50</span><strong>+8 / -8</strong>
+            <span>SMA 20 above/below SMA 50</span><strong>+7 / -7</strong>
+            <span>RSI 45-65, above 72, below 35</span><strong>+8 / -8 / -4</strong>
+            <span>Volume ratio at least 1.1x</span><strong>+5</strong>
+            <span>4h candle bullish/bearish pattern</span><strong>+10 / -10</strong>
+            <span>Positive/negative sentiment</span><strong>+8 / -8</strong>
+            <span>Analyst target upside/downside</span><strong>+8 / -8</strong>
+          </div>
+          <p>Score starts at 50 and is clamped from 0 to 100. This is a transparent rule-based setup score, not a z-score or machine-learning prediction.</p>
+        </details>
       </div>
     </article>
   `;
