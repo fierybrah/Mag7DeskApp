@@ -217,28 +217,28 @@ When Alpaca is configured, detailed candles use Alpaca first. Without Alpaca, Ya
 
 Entry Analysis is a structured setup review. It is not a guarantee and should not be treated as a buy or sell instruction.
 
-The `Setup Quality` score is a transparent rule-based score, not a z-score and not a machine-learning prediction. It starts at `50`, applies weighted adjustments, and clamps the final value between `0` and `100`.
+The `Setup Quality` score is a transparent rule-based score, not a z-score and not a machine-learning prediction. It starts at `50`, applies weighted adjustments, and clamps the final value between `0` and `100`. The current weights are heuristic: they are chosen to make trend, momentum, 4-hour structure, sentiment, and target context visible without letting any single non-price input dominate the score. They should be treated as a baseline that can be tuned later with backtesting.
 
 Current scoring rules:
 
-| Signal | Rule | Score impact |
-| --- | --- | --- |
-| Price vs SMA 20 | Price above SMA 20 | `+8` |
-| Price vs SMA 20 | Price below SMA 20 | `-8` |
-| Price vs SMA 50 | Price above SMA 50 | `+8` |
-| Price vs SMA 50 | Price below SMA 50 | `-8` |
-| Trend structure | SMA 20 above SMA 50 | `+7` |
-| Trend structure | SMA 20 not above SMA 50 | `-7` |
-| RSI 14 | RSI between 45 and 65 | `+8` |
-| RSI 14 | RSI above 72 | `-8` |
-| RSI 14 | RSI below 35 | `-4` |
-| Volume | Volume ratio at or above 1.1x | `+5` |
-| 4-hour candle pattern | Bullish pattern | `+10` |
-| 4-hour candle pattern | Bearish pattern | `-10` |
-| Sentiment | Positive news/analyst sentiment | `+8` |
-| Sentiment | Negative news/analyst sentiment | `-8` |
-| Analyst target | Target implies at least 8% upside | `+8` |
-| Analyst target | Target implies 3% or more downside | `-8` |
+| Signal | Rule | Score impact | Reasoning |
+| --- | --- | --- | --- |
+| Price vs SMA 20 | Price above SMA 20 | `+8` | The 20-day SMA is a short/intermediate trend filter. A price above it supports a constructive entry setup, but it is not enough by itself, so the weight is meaningful but not dominant. |
+| Price vs SMA 20 | Price below SMA 20 | `-8` | A price below the 20-day SMA suggests near-term weakness or loss of momentum. The penalty mirrors the positive rule because the same signal flips from support to resistance. |
+| Price vs SMA 50 | Price above SMA 50 | `+8` | The 50-day SMA is a broader trend filter. A price above it supports higher-quality long setups, but it is weighted the same as SMA 20 to avoid over-concentrating the score in moving averages. |
+| Price vs SMA 50 | Price below SMA 50 | `-8` | A price below the 50-day SMA weakens the broader setup. The penalty mirrors the positive rule because losing the 50-day trend is materially negative for entry quality. |
+| Trend structure | SMA 20 above SMA 50 | `+7` | This captures trend alignment, not just current price location. It is slightly lower than direct price/SMA checks because it changes more slowly and should confirm, not overpower, current price action. |
+| Trend structure | SMA 20 not above SMA 50 | `-7` | If SMA 20 is not above SMA 50, the trend structure is not fully constructive. The penalty is moderate because early reversals can occur before moving averages fully realign. |
+| RSI 14 | RSI between 45 and 65 | `+8` | This range suggests momentum is constructive without being overly extended. It receives a similar weight to trend checks because entry timing often depends on momentum quality. |
+| RSI 14 | RSI above 72 | `-8` | A high RSI can mean strength, but it also increases pullback risk for new entries. The penalty is meaningful because the panel is focused on entry quality, not just trend strength. |
+| RSI 14 | RSI below 35 | `-4` | A low RSI shows weakness, but it can also precede a reversal. The smaller penalty avoids rejecting all oversold recovery setups too aggressively. |
+| Volume | Volume ratio at or above 1.1x | `+5` | Above-average volume helps confirm participation, but volume alone is noisy. The smaller positive weight makes it a supporting confirmation signal. |
+| 4-hour candle pattern | Bullish pattern | `+10` | The 4-hour timeframe is important for entry timing and swing structure. A clear bullish pattern gets the largest single positive weight because it can confirm that buyers are stepping in. |
+| 4-hour candle pattern | Bearish pattern | `-10` | A bearish 4-hour pattern directly undermines entry timing. The penalty mirrors the bullish rule because 4-hour structure is a core confirmation input. |
+| Sentiment | Positive news/analyst sentiment | `+8` | Positive headline and analyst tone can support momentum and confidence. The weight is meaningful but capped because text sentiment can be noisy and should not override price action. |
+| Sentiment | Negative news/analyst sentiment | `-8` | Negative sentiment can pressure price or increase headline risk. The penalty mirrors the positive rule to keep sentiment balanced. |
+| Analyst target | Target implies at least 8% upside | `+8` | A target with meaningful upside gives external valuation support. The 8% threshold avoids rewarding tiny target gaps that may not be actionable after normal volatility. |
+| Analyst target | Target implies 3% or more downside | `-8` | Downside to target is penalized at a lower threshold because negative target gaps can indicate limited upside or valuation risk. The weight is meaningful but not dominant because analyst targets can lag price. |
 
 The model uses these inputs:
 
