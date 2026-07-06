@@ -217,7 +217,30 @@ When Alpaca is configured, detailed candles use Alpaca first. Without Alpaca, Ya
 
 Entry Analysis is a structured setup review. It is not a guarantee and should not be treated as a buy or sell instruction.
 
-The score is affected by:
+The `Setup Quality` score is a transparent rule-based score, not a z-score and not a machine-learning prediction. It starts at `50`, applies weighted adjustments, and clamps the final value between `0` and `100`.
+
+Current scoring rules:
+
+| Signal | Rule | Score impact |
+| --- | --- | --- |
+| Price vs SMA 20 | Price above SMA 20 | `+8` |
+| Price vs SMA 20 | Price below SMA 20 | `-8` |
+| Price vs SMA 50 | Price above SMA 50 | `+8` |
+| Price vs SMA 50 | Price below SMA 50 | `-8` |
+| Trend structure | SMA 20 above SMA 50 | `+7` |
+| Trend structure | SMA 20 not above SMA 50 | `-7` |
+| RSI 14 | RSI between 45 and 65 | `+8` |
+| RSI 14 | RSI above 72 | `-8` |
+| RSI 14 | RSI below 35 | `-4` |
+| Volume | Volume ratio at or above 1.1x | `+5` |
+| 4-hour candle pattern | Bullish pattern | `+10` |
+| 4-hour candle pattern | Bearish pattern | `-10` |
+| Sentiment | Positive news/analyst sentiment | `+8` |
+| Sentiment | Negative news/analyst sentiment | `-8` |
+| Analyst target | Target implies at least 8% upside | `+8` |
+| Analyst target | Target implies 3% or more downside | `-8` |
+
+The model uses these inputs:
 
 - Trend confirmation.
 - Momentum quality.
@@ -226,14 +249,22 @@ The score is affected by:
 - Analyst target upside/downside.
 - News and analyst sentiment.
 
-Common labels:
+Score labels:
 
-- `Strong`: multiple signals align.
-- `Moderate`: constructive, but not fully confirmed.
-- `Watch`: mixed signals or missing confirmation.
-- `Avoid`: weak or unfavorable setup.
+- `75-100`: `Strong`
+- `60-74`: `Moderate`
+- `45-59`: `Watch`
+- `0-44`: `Avoid`
+
+Bias labels:
+
+- `Bullish`: score is `65` or higher.
+- `Neutral`: score is between `41` and `64`.
+- `Bearish`: score is `40` or lower.
 
 `Invalidation` is the level where the setup should be considered weakened by the model. It is not a personalized stop-loss recommendation.
+
+The rule-based model is used first because it is explainable, easy to debug, and does not require a large labeled training dataset. A future machine-learning model could be added later if the app stores historical setups and can validate that an ML model outperforms this rule-based baseline.
 
 ## Troubleshooting
 
