@@ -1,6 +1,6 @@
-# Mag 7 Stock Monitor
+# Mag 7 Stock Desk
 
-A local dashboard that monitors the Magnificent 7 stocks on a near real-time cadence:
+Mag 7 Stock Desk is a local web dashboard for monitoring the Magnificent 7 stocks:
 
 - Apple (`AAPL`)
 - Microsoft (`MSFT`)
@@ -10,40 +10,262 @@ A local dashboard that monitors the Magnificent 7 stocks on a near real-time cad
 - Meta (`META`)
 - Tesla (`TSLA`)
 
-It tracks live quote fields, market cap, day range, 52-week range, volume, Google News headlines, and technicals including SMA 20, SMA 50, RSI 14, volume ratio, and a simple bullish/neutral/bearish signal.
+The app combines market data, technical indicators, candlestick pattern checks, analyst target context, and scoped news headlines. It is designed as a decision-support dashboard, not as automated financial advice.
 
-## Run
+## Main Views
+
+### Entry Analysis
+
+Entry Analysis is the first tab and is intended to summarize whether the selected stock has a constructive setup.
+
+It includes:
+
+- A synced stock selector for the Mag 7 symbols.
+- A `Setup Quality` score from `0` to `100`.
+- Bias: bullish, neutral, bearish, or unavailable.
+- Setup type, such as pullback, continuation, confirmation needed, or wait for repair.
+- Entry zone.
+- Invalidation level.
+- Target price.
+- Estimated risk/reward.
+- Sentiment summary from news and analyst review text.
+- A short explanation list showing the signals that affected the score.
+
+The scoring is rule-based and uses:
+
+- Price versus SMA 20 and SMA 50.
+- SMA 20 versus SMA 50 trend structure.
+- RSI 14.
+- Volume ratio.
+- 4-hour candlestick pattern confirmation.
+- Analyst target upside/downside.
+- News and analyst sentiment keywords.
+
+### Technicals
+
+Technicals contains the charting and indicator workspace for the selected stock.
+
+It includes:
+
+- Live price strip.
+- Candlestick chart.
+- Historical price chart.
+- Candle interval controls: `5m`, `15m`, `30m`, and `4h`.
+- Candle period controls: `1D`, `1W`, `3M`, `6M`, `1Y`, and `All`.
+- Chart zoom and pan controls.
+- Company profile fields.
+- Market statistics.
+- Technical indicators:
+  - SMA 20
+  - SMA 50
+  - RSI 14
+  - Volume ratio
+  - Bullish/neutral/bearish signal
+- Candlestick pattern analysis across multiple periods and intervals.
+
+### News
+
+News is scoped to the selected stock so it is clear which symbol is being reviewed.
+
+It includes:
+
+- Synced stock selector.
+- Scope heading such as `Looking for GOOGL news and analyst reviews`.
+- Analyst review cards.
+- Analyst consensus target, low target, and high target where available.
+- Firm/source review notes from analyst-related headlines.
+- Google News headline feed for the selected stock.
+
+## Data Sources
+
+The app uses several data sources with fallback behavior:
+
+- Alpaca market data, when `ALPACA_API_KEY` and `ALPACA_API_SECRET` are configured.
+- Nasdaq public endpoints for market snapshot, historical data, and analyst target information.
+- Yahoo Finance chart endpoints as a fallback for quote/history/candle data.
+- Google News RSS for headlines and analyst-related news.
+
+For market snapshots, the app prefers Alpaca when credentials are available. If Alpaca is not configured or temporarily unavailable, it tries Nasdaq and Yahoo public endpoints. If public providers rate-limit the request, the app preserves the last good snapshot where possible and can use cached candle data as a fallback instead of showing blank rows.
+
+## Running Locally
+
+Install dependencies:
+
+```bash
+npm install
+```
+
+Start the app:
 
 ```bash
 npm start
 ```
 
-Then open:
+Open:
 
 ```text
 http://localhost:3000
 ```
 
-The server refreshes stock market data every 60 seconds and news every 10 minutes. You can override the port or intervals:
+If port `3000` is already in use, run on another port:
 
 ```bash
-PORT=4000 REFRESH_MS=15000 NEWS_REFRESH_MS=600000 npm start
+PORT=3001 npm start
 ```
 
-## Data Sources
+## Optional Alpaca Configuration
 
-The app fetches quote, chart, summary, and historical data from Nasdaq public endpoints. It fetches headline RSS data from Google News. These public endpoints can occasionally rate-limit or change behavior; the dashboard keeps running, preserves the last successful snapshot where possible, and shows a warning if any live feed cannot be loaded.
+Alpaca credentials are recommended because public finance endpoints can rate-limit.
 
-## Share Publicly
+Set these environment variables before starting the app:
 
-`localhost:3000` only works on your own computer. To share the app with other people, deploy this project to a public web host.
+```bash
+export ALPACA_API_KEY="your_key"
+export ALPACA_API_SECRET="your_secret"
+npm start
+```
 
-### Recommended: Render
+Or run inline:
 
-1. Push this folder to a GitHub repository.
-2. Go to [Render](https://render.com) and create a new Web Service.
+```bash
+ALPACA_API_KEY="your_key" ALPACA_API_SECRET="your_secret" npm start
+```
+
+When configured, Alpaca is used first for market snapshots and detailed candle data. The `4h` candle interval maps to Alpaca `4Hour` bars.
+
+## Refresh Behavior
+
+Default refresh intervals:
+
+- Market snapshot: every 60 seconds.
+- News and analyst review data: every 10 minutes.
+
+Override intervals:
+
+```bash
+REFRESH_MS=15000 NEWS_REFRESH_MS=600000 npm start
+```
+
+Other environment variables:
+
+```bash
+PORT=3000
+FETCH_TIMEOUT_MS=12000
+ALPACA_API_KEY=...
+ALPACA_API_SECRET=...
+```
+
+## API Endpoints
+
+### Health Check
+
+```text
+GET /health
+```
+
+Returns basic server status.
+
+### Snapshot
+
+```text
+GET /api/snapshot
+```
+
+Returns:
+
+- Loading state.
+- Refresh timestamps.
+- Errors, if any.
+- Stock rows.
+- News items.
+- Analyst review items.
+- Refresh interval metadata.
+
+### Manual Refresh
+
+```text
+POST /api/refresh
+```
+
+Forces a fresh market snapshot and news refresh.
+
+### Detailed Candles
+
+```text
+GET /api/candles?symbol=GOOGL&period=week&interval=4h
+```
+
+Supported periods:
+
+- `day`
+- `week`
+- `threeMonth`
+- `sixMonth`
+- `oneYear`
+- `all`
+
+Supported intervals:
+
+- `5m`
+- `15m`
+- `30m`
+- `4h`
+
+When Alpaca is configured, detailed candles use Alpaca first. Without Alpaca, Yahoo is used where possible. For `4h` Yahoo fallback, the app fetches `1h` candles and aggregates them into 4-hour candles.
+
+## Interpreting Entry Analysis
+
+Entry Analysis is a structured setup review. It is not a guarantee and should not be treated as a buy or sell instruction.
+
+The score is affected by:
+
+- Trend confirmation.
+- Momentum quality.
+- Volume participation.
+- 4-hour candle behavior.
+- Analyst target upside/downside.
+- News and analyst sentiment.
+
+Common labels:
+
+- `Strong`: multiple signals align.
+- `Moderate`: constructive, but not fully confirmed.
+- `Watch`: mixed signals or missing confirmation.
+- `Avoid`: weak or unfavorable setup.
+
+`Invalidation` is the level where the setup should be considered weakened by the model. It is not a personalized stop-loss recommendation.
+
+## Troubleshooting
+
+### I see `429 Too Many Requests`
+
+Public providers can rate-limit requests. Configure Alpaca credentials for more reliable market data. The app also caches recent data and preserves prior snapshots where possible.
+
+### I see blank prices or `--`
+
+This usually means no provider returned usable market snapshot data yet. Try:
+
+1. Refreshing after a minute.
+2. Confirming Alpaca environment variables are set.
+3. Restarting the server after setting environment variables.
+4. Checking `/health`.
+
+### The 4-hour chart is empty locally
+
+If Alpaca is not configured, the app uses public fallback providers. These can rate-limit. In an Alpaca-configured environment, the 4-hour chart should use Alpaca `4Hour` bars.
+
+### News loads but technical data does not
+
+News comes from Google News RSS and is independent from market-data providers. If news works but prices do not, the issue is likely with Alpaca/Nasdaq/Yahoo data access.
+
+## Deployment
+
+### Render
+
+1. Push this project to GitHub.
+2. Create a new Render Web Service.
 3. Connect the GitHub repository.
-4. Render can detect `render.yaml`; otherwise use:
+4. Use the included `render.yaml` or configure:
 
 ```text
 Runtime: Node
@@ -52,27 +274,42 @@ Start Command: npm start
 Health Check Path: /health
 ```
 
-5. After deploy, Render gives you a public URL like:
+5. Add environment variables in Render:
 
 ```text
-https://mag7-stock-monitor.onrender.com
+ALPACA_API_KEY
+ALPACA_API_SECRET
 ```
 
-That URL is what you can share.
+6. Deploy and open the Render URL.
 
-### Docker Hosts
+### Docker
 
-You can also deploy anywhere that runs Docker:
+Build:
 
 ```bash
-docker build -t mag7-stock-monitor .
-docker run -p 3000:3000 mag7-stock-monitor
+docker build -t mag7-stock-desk .
 ```
 
-For a real public deployment, run the container on a cloud host such as Fly.io, Railway, Render, AWS, Google Cloud, or Azure.
+Run:
+
+```bash
+docker run -p 3000:3000 \
+  -e ALPACA_API_KEY="your_key" \
+  -e ALPACA_API_SECRET="your_secret" \
+  mag7-stock-desk
+```
+
+Open:
+
+```text
+http://localhost:3000
+```
 
 ## Production Notes
 
-- Keep the Node server running publicly; the frontend depends on `/api/snapshot`.
-- Static hosts like GitHub Pages alone are not enough because they cannot run the backend API.
-- Public finance endpoints may rate-limit high traffic. For a large audience or true tick-by-tick real-time quotes, replace the public Nasdaq/Google News fetches with a paid streaming market data API and server-side caching.
+- Keep the Node server running; the frontend depends on backend API routes.
+- Static hosting alone is not enough because `/api/snapshot`, `/api/candles`, and `/api/refresh` require the Node server.
+- Public finance endpoints may change, rate-limit, or block traffic.
+- Alpaca credentials are strongly recommended for consistent candle and snapshot behavior.
+- This app is for research and monitoring. It does not provide personalized financial advice.
