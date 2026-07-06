@@ -583,6 +583,21 @@ function parseYahooCandles(payload) {
   })).filter((row) => [row.open, row.high, row.low, row.close].every(Number.isFinite));
 }
 
+function parseYahooHistoryRows(payload) {
+  return parseYahooCandles(payload).map((row) => ({
+    date: new Intl.DateTimeFormat("en-US", {
+      month: "2-digit",
+      day: "2-digit",
+      year: "numeric"
+    }).format(new Date(row.time)),
+    close: row.close,
+    volume: row.volume,
+    open: row.open,
+    high: row.high,
+    low: row.low
+  }));
+}
+
 function parseAlpacaCandles(payload) {
   return (payload?.bars || []).map((bar) => ({
     time: bar.t,
@@ -610,6 +625,25 @@ function compactCandles(candles, maxPoints = 1600) {
     });
   }
   return compacted;
+}
+
+function aggregateCandles(candles, bucketSize) {
+  const rows = [];
+  for (let index = 0; index < candles.length; index += bucketSize) {
+    const group = candles.slice(index, index + bucketSize);
+    if (!group.length) continue;
+    const highs = group.map((candle) => candle.high).filter(Number.isFinite);
+    const lows = group.map((candle) => candle.low).filter(Number.isFinite);
+    rows.push({
+      time: group.at(-1).time,
+      open: group[0].open,
+      high: highs.length ? formatNumber(Math.max(...highs)) : null,
+      low: lows.length ? formatNumber(Math.min(...lows)) : null,
+      close: group.at(-1).close,
+      volume: group.reduce((total, candle) => total + (candle.volume || 0), 0)
+    });
+  }
+  return rows.filter((row) => [row.open, row.high, row.low, row.close].every(Number.isFinite));
 }
 
 async function fetchAlpacaCandles(symbol, period, interval) {
@@ -992,6 +1026,82 @@ async function fetchNasdaqStock(stock) {
   };
 }
 
+async function fetchYahooStock(stock) {
+  const [dailyPayload, intradayPayload] = await Promise.all([
+    fetchYahooJson(`https://query2.finance.yahoo.com/v8/finance/chart/${stock.symbol}?range=1y&interval=1d&includePrePost=false`),
+    fetchYahooJson(`https://query2.finance.yahoo.com/v8/finance/chart/${stock.symbol}?range=1d&interval=5m&includePrePost=false`)
+  ]);
+  const dailyResult = dailyPayload?.chart?.result?.[0] || {};
+  const meta = dailyResult.meta || {};
+  const historyRows = parseYahooHistoryRows(dailyPayload);
+  const intradayCandles = parseYahooCandles(intradayPayload);
+  const latestRow = historyRows.at(-1) || {};
+  const previousClose = historyRows.at(-2)?.close ?? meta.chartPreviousClose;
+  const price = parseNumber(meta.regularMarketPrice ?? latestRow.close);
+  const change = Number.isFinite(price) && Number.isFinite(previousClose) ? price - previousClose : null;
+  const changePercent = Number.isFinite(change) && Number.isFinite(previousClose) && previousClose !== 0
+    ? (change / previousClose) * 100
+    : null;
+  const volume = parseNumber(meta.regularMarketVolume ?? latestRow.volume);
+  const averageVolume = average(historyRows.slice(-20).map((row) => row.volume));
+
+  return {
+    ...stock,
+    price: formatNumber(price),
+    change: formatNumber(change),
+    changePercent: formatNumber(changePercent),
+    marketCap: null,
+    pe: null,
+    eps: null,
+    dividendYield: null,
+    open: formatNumber(parseNumber(latestRow.open)),
+    bid: null,
+    ask: null,
+    dayLow: formatNumber(parseNumber(meta.regularMarketDayLow ?? latestRow.low)),
+    dayHigh: formatNumber(parseNumber(meta.regularMarketDayHigh ?? latestRow.high)),
+    fiftyTwoWeekLow: formatNumber(parseNumber(meta.fiftyTwoWeekLow)),
+    fiftyTwoWeekHigh: formatNumber(parseNumber(meta.fiftyTwoWeekHigh)),
+    volume,
+    averageVolume: formatNumber(averageVolume),
+    exchange: meta.fullExchangeName || meta.exchangeName || "",
+    marketState: "Ready",
+    previousClose: formatNumber(previousClose),
+    technicals: calculateTechnicals(historyRows),
+    candles: {
+      fiveMinute: intradayCandles.slice(-90),
+      fifteenMinute: aggregateCandles(intradayCandles, 3).slice(-90),
+      thirtyMinute: aggregateCandles(intradayCandles, 6).slice(-90)
+    },
+    history: buildHistoricalRanges(historyRows),
+    stats: {
+      bid: null,
+      ask: null,
+      volume,
+      averageVolume: formatNumber(averageVolume),
+      open: formatNumber(parseNumber(latestRow.open)),
+      dayHigh: formatNumber(parseNumber(meta.regularMarketDayHigh ?? latestRow.high)),
+      dayLow: formatNumber(parseNumber(meta.regularMarketDayLow ?? latestRow.low)),
+      marketCap: null,
+      fiftyTwoWeekHigh: formatNumber(parseNumber(meta.fiftyTwoWeekHigh)),
+      fiftyTwoWeekLow: formatNumber(parseNumber(meta.fiftyTwoWeekLow)),
+      pe: null,
+      eps: null,
+      dividendYield: null,
+      previousClose: formatNumber(previousClose)
+    },
+    series: historyRows.map((row) => row.close).filter(Number.isFinite).slice(-80).map((value) => formatNumber(value)),
+    source: "Yahoo Finance"
+  };
+}
+
+async function fetchStock(stock) {
+  try {
+    return await fetchNasdaqStock(stock);
+  } catch (error) {
+    return fetchYahooStock(stock);
+  }
+}
+
 async function collectSnapshot() {
   if (state.loading) return state;
 
@@ -1015,7 +1125,7 @@ async function collectSnapshot() {
 
   try {
     const previousStockMap = new Map(state.stocks.map((stock) => [stock.symbol, stock]));
-    const stockResults = await Promise.allSettled(STOCKS.map(fetchNasdaqStock));
+    const stockResults = await Promise.allSettled(STOCKS.map(fetchStock));
     const stockRows = stockResults.map((result, index) => {
       if (result.status === "fulfilled") return result.value;
       state.errors.push(`${STOCKS[index].symbol} market data: ${result.reason.message}`);
