@@ -426,12 +426,6 @@ button:disabled {
 
 /* ---------- Technicals view ---------- */
 
-.detail-hint {
-  margin: 0 0 12px;
-  color: var(--muted);
-  font-size: 0.88rem;
-}
-
 .technical-workspace {
   scroll-margin-top: calc(var(--nav-h) + 90px);
   display: grid;

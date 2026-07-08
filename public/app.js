@@ -23,7 +23,6 @@ const els = {
   entryAnalysis: document.querySelector("#entryAnalysis"),
   priceStrip: document.querySelector("#priceStrip"),
   newsStockStrip: document.querySelector("#newsStockStrip"),
-  selectedSignalHint: document.querySelector("#selectedSignalHint"),
   candleTitle: document.querySelector("#candleTitle"),
   historyTitle: document.querySelector("#historyTitle"),
   statsTitle: document.querySelector("#statsTitle"),
@@ -988,7 +987,6 @@ function renderTechnicalWorkspace() {
     drawEmptyChart(els.historyChart, "Waiting for historical data.");
     renderStats(null);
     renderCandleAnalysis(null);
-    els.selectedSignalHint.textContent = "Select a stock from the live-price strip above.";
     return;
   }
 
@@ -1015,7 +1013,6 @@ function renderTechnicalWorkspace() {
     : periodLabels[state.candlePeriod];
   els.candleTitle.textContent = `${stock.symbol} · ${effectiveLabel} · ${state.candleInterval}`;
   els.historyTitle.textContent = `${stock.symbol} · ${historyLabels[state.historyRange]}`;
-  els.selectedSignalHint.textContent = `${stock.symbol} · ${stock.technicals?.signal || "Unavailable"} (${signalRationale(stock)})`;
   els.statsTitle.textContent = `${money(stock.price)} ${stock.symbol}`;
   if (!candleData) {
     drawEmptyChart(els.candleChart, "Loading detailed candles...");
