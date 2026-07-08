@@ -9,86 +9,40 @@
         window.location.replace("http://localhost:3000/");
       }
     </script>
-    <link rel="stylesheet" href="styles.css?v=20260706-entry-rules-v2">
+    <link rel="stylesheet" href="styles.css?v=20260707-ux-refresh">
   </head>
   <body>
     <header class="site-nav">
       <a class="brand" href="#top" aria-label="Mag 7 Stock Desk home">
         <span class="brand-mark">M7</span>
-        <span>Stock Desk</span>
+        <span class="brand-name">Stock Desk</span>
       </a>
-      <nav class="site-links" aria-label="Site sections">
-        <a href="#dashboard" data-nav-view="entry">Entry Analysis</a>
-        <a href="#technicals" data-nav-view="technicals">Technicals</a>
-        <a href="#headlines" data-nav-view="news">Headlines</a>
-      </nav>
-    </header>
-
-    <main id="top" class="shell">
-      <section class="hero-band" aria-label="Mag 7 market snapshot">
-        <div>
-          <p class="eyebrow">Real-time market monitor</p>
-          <h1>Mag 7 Stock Desk</h1>
-          <p class="hero-copy">Live prices, technical posture, and current headlines for the seven stocks moving the market.</p>
-        </div>
-        <div class="actions">
-          <div class="status-pill" id="marketStatus">Loading</div>
-          <button id="refreshBtn" type="button" title="Refresh now" aria-label="Refresh now">
-            <span aria-hidden="true">↻</span>
-          </button>
-        </div>
-      </section>
-
-      <section id="dashboard" class="section-head">
-        <div>
-          <p class="eyebrow">Live market workspace</p>
-          <h2>Entry analysis, technicals, and market context</h2>
-          <p id="marketPulse" class="market-pulse">Loading market pulse.</p>
-        </div>
-        <p id="dataSource">Sources: Alpaca, Nasdaq, and Yahoo market data</p>
-      </section>
-
       <nav class="tabs" aria-label="Dashboard views">
-        <button class="tab active" data-view="entry" type="button">Entry Analysis</button>
+        <button class="tab active" data-view="entry" type="button">Entry</button>
         <button class="tab" data-view="technicals" type="button">Technicals</button>
         <button class="tab" data-view="news" type="button">News</button>
       </nav>
+      <div class="actions">
+        <div class="status-pill" id="marketStatus">Loading</div>
+        <button id="refreshBtn" type="button" title="Refresh now" aria-label="Refresh now">
+          <span aria-hidden="true">&#8635;</span>
+        </button>
+      </div>
+    </header>
+
+    <main id="top" class="shell">
+      <p id="marketPulse" class="market-pulse">Loading market pulse.</p>
 
       <section id="errorPanel" class="error-panel hidden" aria-live="polite"></section>
 
       <section id="entryView" class="view active">
-        <section class="summary-grid" aria-label="Market summary">
-          <div class="metric">
-            <span>Combined Market Cap</span>
-            <strong id="totalCap">--</strong>
-          </div>
-          <div class="metric">
-            <span>Advancers</span>
-            <strong id="advancers">--</strong>
-          </div>
-          <div class="metric">
-            <span>Average Move</span>
-            <strong id="avgMove">--</strong>
-          </div>
-          <div class="metric">
-            <span>Next Refresh</span>
-            <strong id="nextRefresh">--</strong>
-          </div>
-        </section>
         <div id="entryStockStrip" class="price-strip" aria-label="Select stock for entry analysis"></div>
         <section id="entryAnalysis" class="entry-analysis" aria-live="polite"></section>
       </section>
 
       <section id="technicalsView" class="view">
         <div id="priceStrip" class="price-strip" aria-label="Live Mag 7 prices"></div>
-        <section id="stockDetail" class="stock-detail" aria-label="Selected stock technical details">
-        <div id="signals" class="section-head compact-head">
-          <div>
-            <p class="eyebrow">Selected stock</p>
-            <h2>Full market and technical detail</h2>
-          </div>
-          <p id="selectedSignalHint" class="detail-hint">Select a stock from the live-price strip above.</p>
-        </div>
+        <p id="selectedSignalHint" class="detail-hint">Select a stock from the live-price strip above.</p>
         <section class="technical-workspace" aria-label="Selected stock technical charts and stats">
           <article class="chart-panel">
             <div class="panel-head">
@@ -112,11 +66,11 @@
                   <button class="mini-tab" data-candle-interval="4h" type="button">4h</button>
                 </div>
                 <div class="chart-zoom" aria-label="Candlestick chart zoom controls">
-                  <button id="candlePanEarlier" type="button" aria-label="Show earlier candles" title="Show earlier candles" disabled>←</button>
-                  <button id="candleZoomOut" type="button" aria-label="Zoom out" title="Zoom out" disabled>−</button>
-                  <button id="candleZoomReset" type="button" aria-label="Reset chart zoom" title="Reset chart zoom" disabled>↺</button>
+                  <button id="candlePanEarlier" type="button" aria-label="Show earlier candles" title="Show earlier candles" disabled>&#8592;</button>
+                  <button id="candleZoomOut" type="button" aria-label="Zoom out" title="Zoom out" disabled>&#8722;</button>
+                  <button id="candleZoomReset" type="button" aria-label="Reset chart zoom" title="Reset chart zoom" disabled>&#8634;</button>
                   <button id="candleZoomIn" type="button" aria-label="Zoom in" title="Zoom in" disabled>+</button>
-                  <button id="candlePanLater" type="button" aria-label="Show later candles" title="Show later candles" disabled>→</button>
+                  <button id="candlePanLater" type="button" aria-label="Show later candles" title="Show later candles" disabled>&#8594;</button>
                 </div>
               </div>
             </div>
@@ -162,32 +116,22 @@
             <div id="candleAnalysis" class="candle-analysis-grid" aria-live="polite"></div>
           </article>
         </section>
-        </section>
       </section>
 
       <section id="newsView" class="view">
-        <div id="headlines" class="section-head compact-head">
-          <div>
-            <p class="eyebrow">Market intelligence</p>
-            <h2>Latest headlines</h2>
-          </div>
-        </div>
-        <div id="newsStockStrip" class="price-strip news-stock-strip" aria-label="Select stock news"></div>
-        <div class="news-scope" aria-live="polite">
-          <span>Current scope</span>
-          <h3 id="newsScopeTitle">Looking for selected stock news</h3>
-          <p id="newsScopeCopy">Analyst reviews and headlines below follow the selected stock.</p>
-        </div>
+        <div id="newsStockStrip" class="price-strip" aria-label="Select stock news"></div>
+        <h3 class="group-label">Analyst reviews</h3>
         <div id="analystReviews" class="analyst-review-grid"></div>
+        <h3 class="group-label">Headlines</h3>
         <div id="newsList" class="news-list"></div>
       </section>
 
       <footer class="site-footer">
         <span>Mag 7 Stock Desk</span>
-        <span>Alpaca/Nasdaq/Yahoo quotes, Google News headlines, and analyst reviews</span>
+        <span>Alpaca, Nasdaq, and Yahoo quotes &middot; Google News headlines &middot; analyst reviews</span>
       </footer>
     </main>
 
-    <script src="app.js?v=20260706-entry-rules-v2"></script>
+    <script src="app.js?v=20260707-scoring-v2"></script>
   </body>
 </html>
