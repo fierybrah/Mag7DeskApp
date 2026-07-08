@@ -165,13 +165,6 @@ button:disabled {
   padding: 16px 0 44px;
 }
 
-.market-pulse {
-  margin: 0 0 12px;
-  color: var(--muted);
-  font-size: 0.9rem;
-  line-height: 1.45;
-}
-
 .error-panel {
   margin: 0 0 14px;
   padding: 12px 14px;
@@ -583,6 +576,14 @@ button:disabled {
   margin-top: 5px;
   overflow-wrap: anywhere;
   font-size: 0.98rem;
+}
+
+.stat-cell small {
+  display: block;
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 0.72rem;
+  line-height: 1.3;
 }
 
 .analysis-note {

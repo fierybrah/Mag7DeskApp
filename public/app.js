@@ -19,7 +19,6 @@ const state = {
 const els = {
   refreshBtn: document.querySelector("#refreshBtn"),
   marketStatus: document.querySelector("#marketStatus"),
-  marketPulse: document.querySelector("#marketPulse"),
   entryStockStrip: document.querySelector("#entryStockStrip"),
   entryAnalysis: document.querySelector("#entryAnalysis"),
   priceStrip: document.querySelector("#priceStrip"),
@@ -475,23 +474,13 @@ function handleChartPointer(kind, event) {
 
 function renderSummary(stocks) {
   const marketState = stocks.find((stock) => stock.marketState)?.marketState;
-  els.marketStatus.textContent = state.data?.loading ? "Updating" : (marketState || "Ready");
-}
-
-function renderBrief(stocks) {
-  const validMoves = stocks.filter((stock) => Number.isFinite(stock.changePercent));
-  const advancers = validMoves.filter((stock) => stock.changePercent > 0).length;
-  const decliners = validMoves.filter((stock) => stock.changePercent < 0).length;
-  const bullish = stocks.filter((stock) => stock.technicals?.signal === "Bullish").length;
-  const bearish = stocks.filter((stock) => stock.technicals?.signal === "Bearish").length;
-  const neutral = stocks.filter((stock) => stock.technicals?.signal === "Neutral").length;
-  let tone = "Balanced";
-  if (advancers >= 5) tone = "Risk On";
-  if (decliners >= 5) tone = "Risk Off";
-
-  els.marketPulse.textContent = validMoves.length
-    ? `${tone} · ${advancers} advancing · ${decliners} declining · Signals: ${bullish} bullish, ${neutral} neutral, ${bearish} bearish.`
-    : "Waiting for the latest market breadth snapshot.";
+  if (state.data?.loading) {
+    els.marketStatus.textContent = "Updating";
+    return;
+  }
+  els.marketStatus.textContent = marketState === "Rate-limited snapshot"
+    ? `Updated ${dateTime(state.data?.lastUpdated)}`
+    : (marketState || "Ready");
 }
 
 function signalRationale(stock) {
@@ -779,9 +768,12 @@ function renderStats(stock) {
     ["Headquarters", stock.headquarters || "--"]
   ];
   const signal = stock.technicals?.signal || "Unavailable";
+  const bidValue = stock.stats?.bid ?? stock.bid;
+  const askValue = stock.stats?.ask ?? stock.ask;
+  const quoteNote = "Appears during the next trading day";
   const stats = [
-    ["Bid", money(stock.stats?.bid ?? stock.bid)],
-    ["Ask", money(stock.stats?.ask ?? stock.ask)],
+    ["Bid", money(bidValue), Number.isFinite(bidValue) ? "" : quoteNote],
+    ["Ask", money(askValue), Number.isFinite(askValue) ? "" : quoteNote],
     ["Volume", compact(stock.stats?.volume ?? stock.volume)],
     ["Average vol", compact(stock.stats?.averageVolume ?? stock.averageVolume)],
     ["Open", money(stock.stats?.open ?? stock.open)],
@@ -807,10 +799,11 @@ function renderStats(stock) {
       <strong>${value}</strong>
     </div>
   `).join("");
-  els.statsGrid.innerHTML = stats.map(([label, value]) => `
+  els.statsGrid.innerHTML = stats.map(([label, value, note]) => `
     <div class="stat-cell">
       <span>${label}</span>
       <strong>${value}</strong>
+      ${note ? `<small>${note}</small>` : ""}
     </div>
   `).join("");
 }
@@ -1137,7 +1130,6 @@ function renderErrors() {
 function render() {
   const stocks = filteredStocks();
   renderSummary(state.data?.stocks || []);
-  renderBrief(state.data?.stocks || []);
   renderErrors();
   renderPriceStrip(stocks, els.entryStockStrip, false);
   renderPriceStrip(stocks);
