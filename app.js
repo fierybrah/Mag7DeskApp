@@ -19,10 +19,6 @@ const state = {
 const els = {
   refreshBtn: document.querySelector("#refreshBtn"),
   marketStatus: document.querySelector("#marketStatus"),
-  totalCap: document.querySelector("#totalCap"),
-  advancers: document.querySelector("#advancers"),
-  avgMove: document.querySelector("#avgMove"),
-  nextRefresh: document.querySelector("#nextRefresh"),
   marketPulse: document.querySelector("#marketPulse"),
   entryStockStrip: document.querySelector("#entryStockStrip"),
   entryAnalysis: document.querySelector("#entryAnalysis"),
@@ -45,8 +41,6 @@ const els = {
   profileGrid: document.querySelector("#profileGrid"),
   statsGrid: document.querySelector("#statsGrid"),
   analystReviews: document.querySelector("#analystReviews"),
-  newsScopeTitle: document.querySelector("#newsScopeTitle"),
-  newsScopeCopy: document.querySelector("#newsScopeCopy"),
   newsList: document.querySelector("#newsList"),
   errorPanel: document.querySelector("#errorPanel"),
 };
@@ -480,17 +474,6 @@ function handleChartPointer(kind, event) {
 }
 
 function renderSummary(stocks) {
-  const cap = stocks.reduce((sum, stock) => sum + (stock.marketCap || 0), 0);
-  const moves = stocks.map((stock) => stock.changePercent).filter(Number.isFinite);
-  const avgMove = moves.length ? moves.reduce((sum, value) => sum + value, 0) / moves.length : null;
-  const advancers = stocks.filter((stock) => stock.changePercent > 0).length;
-
-  els.totalCap.textContent = compact(cap);
-  els.advancers.textContent = `${advancers}/${stocks.length || 7}`;
-  els.avgMove.textContent = Number.isFinite(avgMove) ? percent(avgMove) : "--";
-  els.avgMove.className = Number.isFinite(avgMove) ? (avgMove >= 0 ? "up" : "down") : "";
-  els.nextRefresh.textContent = dateTime(state.data?.nextRefresh);
-
   const marketState = stocks.find((stock) => stock.marketState)?.marketState;
   els.marketStatus.textContent = state.data?.loading ? "Updating" : (marketState || "Ready");
 }
@@ -546,7 +529,7 @@ function selectStock(symbol, scrollToDetail = true) {
   renderTechnicalWorkspace();
   renderNews();
   if (scrollToDetail) {
-    window.requestAnimationFrame(() => document.querySelector("#stockDetail")?.scrollIntoView({ behavior: "smooth", block: "start" }));
+    window.requestAnimationFrame(() => document.querySelector(".technical-workspace")?.scrollIntoView({ behavior: "smooth", block: "start" }));
   }
 }
 
@@ -555,25 +538,27 @@ function selectedTechnicalStock() {
   return stocks.find((stock) => stock.symbol === state.technicalSymbol) || stocks[0] || null;
 }
 
+const POSITIVE_SENTIMENT = /\b(upgrades?|upgraded|raises?|raised|boosts?|beats?|bullish|buy|outperform|overweight|strong|rall(?:y|ies)|upside)\b/g;
+const NEGATIVE_SENTIMENT = /\b(downgrades?|downgraded|lowers?|lowered|cuts?|miss(?:es|ed)?|bearish|sell|underperform|underweight|weak|lawsuits?|probes?|slumps?|plunges?)\b/g;
+
 function sentimentForStock(symbol) {
   const textItems = [
     ...(state.data?.news || []).filter((item) => item.symbol === symbol),
     ...(state.data?.analystReviews || []).filter((item) => item.symbol === symbol)
   ];
-  const positiveWords = ["upgrade", "raised", "raise", "boost", "beat", "bullish", "buy", "outperform", "strong", "rally", "upside"];
-  const negativeWords = ["downgrade", "lowered", "cut", "miss", "bearish", "sell", "underperform", "weak", "lawsuit", "probe", "slump"];
-  let score = 0;
+  // Average per item (each capped at +/-1) so sheer coverage volume cannot
+  // push a mega cap positive on routine "buy"/"strong" analyst boilerplate.
+  let total = 0;
   textItems.forEach((item) => {
     const text = `${item.title || ""} ${item.action || ""} ${item.recommendation || ""}`.toLowerCase();
-    positiveWords.forEach((word) => {
-      if (text.includes(word)) score += 1;
-    });
-    negativeWords.forEach((word) => {
-      if (text.includes(word)) score -= 1;
-    });
+    const positives = (text.match(POSITIVE_SENTIMENT) || []).length;
+    const negatives = (text.match(NEGATIVE_SENTIMENT) || []).length;
+    total += clamp(positives - negatives, -1, 1);
   });
-  const label = score >= 3 ? "Positive" : score <= -3 ? "Negative" : "Mixed";
-  return { score, label, count: textItems.length };
+  const count = textItems.length;
+  const value = count ? clamp((total / count) * 2, -1, 1) : 0;
+  const label = count >= 3 && value >= 0.35 ? "Positive" : count >= 3 && value <= -0.35 ? "Negative" : "Mixed";
+  return { value, label, count };
 }
 
 function analystTargetForStock(symbol) {
@@ -601,8 +586,6 @@ function entryAnalysisForStock(stock) {
     };
   }
 
-  const reasons = [];
-  let score = 50;
   const sma20 = stock.technicals?.sma20;
   const sma50 = stock.technicals?.sma50;
   const rsi = stock.technicals?.rsi14;
@@ -616,79 +599,104 @@ function entryAnalysisForStock(stock) {
     loadDetailedCandles(stock.symbol, "week", "4h");
   }
 
-  if (Number.isFinite(sma20) && price > sma20) {
-    score += 8;
-    reasons.push("Price is above the 20-day SMA.");
-  } else if (Number.isFinite(sma20)) {
-    score -= 8;
-    reasons.push("Price is below the 20-day SMA.");
+  // Each factor scores -1..+1 and carries a weight. Missing factors are
+  // excluded and the remaining weights renormalized, so absent data neither
+  // fakes neutrality nor drags the score toward 50.
+  const factors = [];
+  const notes = [];
+
+  // Trend: the three SMA relationships are graded by distance and averaged
+  // into ONE factor, so the correlated checks cannot triple-count.
+  const trendParts = [];
+  if (Number.isFinite(sma20)) {
+    trendParts.push({ value: clamp((price - sma20) / sma20 / 0.03, -1, 1), text: `${price >= sma20 ? "above" : "below"} the 20D SMA` });
+  }
+  if (Number.isFinite(sma50)) {
+    trendParts.push({ value: clamp((price - sma50) / sma50 / 0.05, -1, 1), text: `${price >= sma50 ? "above" : "below"} the 50D SMA` });
+  }
+  if (Number.isFinite(sma20) && Number.isFinite(sma50)) {
+    trendParts.push({ value: clamp((sma20 - sma50) / sma50 / 0.02, -1, 1), text: `20D SMA ${sma20 >= sma50 ? "above" : "below"} the 50D` });
+  }
+  if (trendParts.length) {
+    factors.push({
+      weight: 20,
+      value: average(trendParts.map((part) => part.value)),
+      reason: `Trend: price is ${trendParts.map((part) => part.text).join(", ")}.`
+    });
   }
 
-  if (Number.isFinite(sma50) && price > sma50) {
-    score += 8;
-    reasons.push("Price is above the 50-day SMA.");
-  } else if (Number.isFinite(sma50)) {
-    score -= 8;
-    reasons.push("Price is below the 50-day SMA.");
-  }
-
-  if (Number.isFinite(sma20) && Number.isFinite(sma50) && sma20 > sma50) {
-    score += 7;
-    reasons.push("The medium-term trend is constructive.");
-  } else if (Number.isFinite(sma20) && Number.isFinite(sma50)) {
-    score -= 7;
-    reasons.push("The medium-term trend is not confirmed.");
-  }
-
+  // Momentum: peaks near RSI 55 and fades smoothly toward both extremes, so
+  // overbought and oversold are penalized symmetrically with no cliffs.
   if (Number.isFinite(rsi)) {
-    if (rsi >= 45 && rsi <= 65) {
-      score += 8;
-      reasons.push("RSI is in a constructive range.");
-    } else if (rsi > 72) {
-      score -= 8;
-      reasons.push("RSI is extended, so entry risk is higher.");
-    } else if (rsi < 35) {
-      score -= 4;
-      reasons.push("RSI is weak and needs confirmation.");
-    }
+    const value = clamp(1 - Math.abs(rsi - 55) / 20, -1, 1);
+    const tone = value > 0.5 ? "constructive" : value >= 0 ? "acceptable" : rsi > 55 ? "extended" : "weak";
+    factors.push({ weight: 12, value, reason: `RSI 14 is ${number(rsi)} (${tone}).` });
   }
 
-  if (Number.isFinite(volumeRatio) && volumeRatio >= 1.1) {
-    score += 5;
-    reasons.push("Volume is above its recent average.");
+  // Volume confirms direction: heavy volume on a down day is a warning, not
+  // a bonus. Near-average volume says nothing.
+  if (Number.isFinite(volumeRatio) && Number.isFinite(stock.changePercent)) {
+    const heavy = volumeRatio >= 1.1;
+    const direction = stock.changePercent >= 0 ? 1 : -1;
+    const value = heavy ? clamp((volumeRatio - 1) / 0.5, 0, 1) * direction : 0;
+    factors.push({
+      weight: 6,
+      value,
+      reason: heavy
+        ? `Above-average volume is confirming today's ${direction > 0 ? "advance" : "decline"}.`
+        : "Volume is near its recent average, so it confirms nothing."
+    });
   }
 
-  if (fourHourData?.candles?.length) {
+  const completedFourHour = (fourHourData?.candles || []).filter((candle) => [candle.open, candle.high, candle.low, candle.close].every(Number.isFinite));
+  if (completedFourHour.length >= 8) {
     const candleSignal = analyseCandlestickPattern(fourHourData.candles);
-    if (candleSignal.signal === "Bullish") score += 10;
-    if (candleSignal.signal === "Bearish") score -= 10;
-    reasons.push(`4h pattern: ${candleSignal.text}`);
+    const value = candleSignal.signal === "Bullish" ? 1 : candleSignal.signal === "Bearish" ? -1 : 0;
+    factors.push({ weight: 12, value, reason: `4h pattern: ${candleSignal.text}` });
+  } else if (fourHourData) {
+    notes.push("Too few completed 4h candles to score the pattern, so it is excluded.");
   } else {
-    reasons.push("4h pattern confirmation is still loading.");
+    notes.push("4h pattern is still loading and is excluded from the score until it arrives.");
   }
 
-  if (sentiment.label === "Positive") score += 8;
-  if (sentiment.label === "Negative") score -= 8;
-  reasons.push(`${sentiment.label} news and analyst sentiment across ${sentiment.count} scoped items.`);
+  if (sentiment.count >= 3) {
+    factors.push({ weight: 10, value: sentiment.value, reason: `${sentiment.label} news and analyst tone across ${sentiment.count} scoped items.` });
+  } else {
+    notes.push("Too few headlines and analyst notes to score sentiment yet.");
+  }
 
+  // Analyst targets for these names sit above price most of the time, so raw
+  // upside is measured against a typical +8% consensus premium.
   if (Number.isFinite(target)) {
     const upside = ((target - price) / price) * 100;
-    if (upside >= 8) score += 8;
-    else if (upside <= -3) score -= 8;
-    reasons.push(`Analyst target implies ${percent(upside)} from the current price.`);
+    factors.push({
+      weight: 10,
+      value: clamp((upside - 8) / 10, -1, 1),
+      reason: `Analyst target implies ${percent(upside)} vs the typical +8% consensus premium.`
+    });
   }
 
-  score = Math.round(clamp(score, 0, 100));
-  const bias = score >= 65 ? "Bullish" : score <= 40 ? "Bearish" : "Neutral";
+  const totalWeight = factors.reduce((sum, factor) => sum + factor.weight, 0);
+  const weighted = factors.reduce((sum, factor) => sum + factor.weight * factor.value, 0);
+  const score = totalWeight ? Math.round(clamp(50 + 50 * (weighted / totalWeight), 0, 100)) : 50;
+  const reasons = [
+    ...factors.map((factor) => {
+      const points = Math.round((factor.weight * factor.value / totalWeight) * 50);
+      return `${factor.reason} (${points >= 0 ? "+" : ""}${points} pts)`;
+    }),
+    ...notes
+  ];
+
+  const bias = score >= 62 ? "Bullish" : score <= 38 ? "Bearish" : "Neutral";
   const quality = score >= 75 ? "Strong" : score >= 60 ? "Moderate" : score >= 45 ? "Watch" : "Avoid";
   const setup = bias === "Bullish"
     ? (Number.isFinite(rsi) && rsi > 68 ? "Momentum watch" : "Pullback or continuation")
     : bias === "Bearish" ? "Wait for repair" : "Confirmation needed";
   const entryLow = Number.isFinite(sma20) && bias === "Bullish" ? Math.min(price, sma20 * 1.01) : price * 0.985;
   const entryHigh = bias === "Bullish" ? price * 1.005 : price * 1.01;
-  const invalidation = Math.min(
-    ...[stock.dayLow, sma50, price * 0.97].filter(Number.isFinite)
-  );
+  // Nearest support below price, not the lowest of mixed timeframes.
+  const supports = [stock.dayLow, sma20, sma50, price * 0.97].filter((level) => Number.isFinite(level) && level < price);
+  const invalidation = supports.length ? Math.max(...supports) : price * 0.97;
   const targetPrice = Number.isFinite(target) && target > price ? target : (Number.isFinite(stock.fiftyTwoWeekHigh) ? stock.fiftyTwoWeekHigh : price * 1.05);
   const risk = price - invalidation;
   const reward = targetPrice - price;
@@ -705,7 +713,7 @@ function entryAnalysisForStock(stock) {
     target: money(targetPrice),
     riskReward,
     sentiment: sentiment.label,
-    reasons: reasons.slice(0, 5)
+    reasons: reasons.slice(0, 7)
   };
 }
 
@@ -743,16 +751,14 @@ function renderEntryAnalysis() {
         <details class="entry-rules">
           <summary>Scoring rules</summary>
           <div class="entry-rules-table">
-            <div><span>Price vs SMA 20</span><strong>+8 / -8</strong><p>Short/intermediate trend filter; meaningful, but not dominant.</p></div>
-            <div><span>Price vs SMA 50</span><strong>+8 / -8</strong><p>Broader trend filter; weighted equally with SMA 20 to avoid over-concentration.</p></div>
-            <div><span>SMA 20 vs SMA 50</span><strong>+7 / -7</strong><p>Confirms trend structure, but changes slowly, so it is slightly lighter.</p></div>
-            <div><span>RSI 14</span><strong>+8 / -8 / -4</strong><p>Rewards constructive momentum, penalizes extended entries, and lightly penalizes weak/oversold setups.</p></div>
-            <div><span>Volume</span><strong>+5</strong><p>Above-average volume confirms participation, but volume is noisy, so it stays supportive.</p></div>
-            <div><span>4h candle pattern</span><strong>+10 / -10</strong><p>Largest single weight because 4h structure is central to entry timing.</p></div>
-            <div><span>Sentiment</span><strong>+8 / -8</strong><p>News and analyst tone can support or pressure a setup, but should not override price action.</p></div>
-            <div><span>Analyst target</span><strong>+8 / -8</strong><p>Meaningful upside/downside adds valuation context, while avoiding tiny target gaps.</p></div>
+            <div><span>Trend composite</span><strong>weight 20</strong><p>Price vs the 20D and 50D SMAs plus their structure, graded by distance and averaged so the three correlated checks count as one signal instead of three.</p></div>
+            <div><span>RSI 14</span><strong>weight 12</strong><p>Peaks near RSI 55 and fades smoothly toward both extremes, so overbought and oversold are penalized symmetrically with no threshold cliffs.</p></div>
+            <div><span>Volume</span><strong>weight 6</strong><p>Above-average volume only confirms: it adds in the direction of the day's move, so heavy selling volume counts against the setup.</p></div>
+            <div><span>4h candle pattern</span><strong>weight 12</strong><p>Bullish or bearish 4h structure. While candles are still loading the factor is excluded and the rest are reweighted, not silently scored as neutral.</p></div>
+            <div><span>Sentiment</span><strong>weight 10</strong><p>Whole-word matches averaged per headline and analyst note, so a large volume of routine mega-cap coverage no longer reads as positive by default.</p></div>
+            <div><span>Analyst target</span><strong>weight 10</strong><p>Upside measured against the typical +8% consensus premium, because mean targets for these names sit above the price most of the time.</p></div>
           </div>
-          <p>Score starts at 50 and is clamped from 0 to 100. This is a transparent rule-based setup score, not a z-score or machine-learning prediction.</p>
+          <p>Each factor scores -1 to +1, is weighted as shown, and the weighted average maps to 0-100 around a neutral 50. Bias reads bullish at 62+ and bearish at 38-, symmetric around neutral. Missing factors are excluded and the remaining weights renormalized. This is a transparent rule-based setup score, not a prediction.</p>
         </details>
       </div>
     </article>
@@ -1054,13 +1060,6 @@ function renderNews() {
   const selectedStock = selectedTechnicalStock();
   const selectedSymbol = selectedStock?.symbol;
   renderPriceStrip(stocks, els.newsStockStrip, false);
-  if (selectedStock) {
-    els.newsScopeTitle.textContent = `Looking for ${selectedStock.symbol} news and analyst reviews`;
-    els.newsScopeCopy.textContent = `${selectedStock.name} is the active stock in scope for the analyst reviews, price targets, and headlines below.`;
-  } else {
-    els.newsScopeTitle.textContent = "Looking for selected stock news";
-    els.newsScopeCopy.textContent = "Analyst reviews and headlines below follow the selected stock.";
-  }
 
   const reviews = (state.data?.analystReviews || []).filter((item) => item.symbol === selectedSymbol);
   const items = (state.data?.news || []).filter((item) => item.symbol === selectedSymbol);
@@ -1186,12 +1185,6 @@ function scheduleNextSnapshot() {
 document.querySelectorAll(".tab").forEach((tab) => {
   tab.addEventListener("click", () => {
     activateView(tab.dataset.view);
-  });
-});
-
-document.querySelectorAll("[data-nav-view]").forEach((link) => {
-  link.addEventListener("click", () => {
-    activateView(link.dataset.navView);
   });
 });
 

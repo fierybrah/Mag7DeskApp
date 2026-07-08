@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Mag 7 Monitor</title>
+    <script>
+      if (window.location.protocol === "file:") {
+        window.location.replace("http://localhost:3000/");
+      }
+    </script>
+    <link rel="stylesheet" href="styles.css?v=20260707-ux-refresh">
+  </head>
+  <body>
+    <header class="site-nav">
+      <a class="brand" href="#top" aria-label="Mag 7 Stock Desk home">
+        <span class="brand-mark">M7</span>
+        <span class="brand-name">Stock Desk</span>
+      </a>
+      <nav class="tabs" aria-label="Dashboard views">
+        <button class="tab active" data-view="entry" type="button">Entry</button>
+        <button class="tab" data-view="technicals" type="button">Technicals</button>
+        <button class="tab" data-view="news" type="button">News</button>
+      </nav>
+      <div class="actions">
+        <div class="status-pill" id="marketStatus">Loading</div>
+        <button id="refreshBtn" type="button" title="Refresh now" aria-label="Refresh now">
+          <span aria-hidden="true">&#8635;</span>
+        </button>
+      </div>
+    </header>
+
+    <main id="top" class="shell">
+      <p id="marketPulse" class="market-pulse">Loading market pulse.</p>
+
+      <section id="errorPanel" class="error-panel hidden" aria-live="polite"></section>
+
+      <section id="entryView" class="view active">
+        <div id="entryStockStrip" class="price-strip" aria-label="Select stock for entry analysis"></div>
+        <section id="entryAnalysis" class="entry-analysis" aria-live="polite"></section>
+      </section>
+
+      <section id="technicalsView" class="view">
+        <div id="priceStrip" class="price-strip" aria-label="Live Mag 7 prices"></div>
+        <p id="selectedSignalHint" class="detail-hint">Select a stock from the live-price strip above.</p>
+        <section class="technical-workspace" aria-label="Selected stock technical charts and stats">
+          <article class="chart-panel">
+            <div class="panel-head">
+              <div>
+                <span class="panel-label">Candlestick chart</span>
+                <strong id="candleTitle">--</strong>
+              </div>
+              <div class="chart-control-stack">
+                <div class="segmented wide" aria-label="Candlestick time period">
+                  <button class="mini-tab" data-candle-period="day" type="button">1D</button>
+                  <button class="mini-tab active" data-candle-period="week" type="button">1W</button>
+                  <button class="mini-tab" data-candle-period="threeMonth" type="button">3M</button>
+                  <button class="mini-tab" data-candle-period="sixMonth" type="button">6M</button>
+                  <button class="mini-tab" data-candle-period="oneYear" type="button">1Y</button>
+                  <button class="mini-tab" data-candle-period="all" type="button">All</button>
+                </div>
+                <div class="segmented wide" aria-label="Candlestick tick interval">
+                  <button class="mini-tab active" data-candle-interval="5m" type="button">5m</button>
+                  <button class="mini-tab" data-candle-interval="15m" type="button">15m</button>
+                  <button class="mini-tab" data-candle-interval="30m" type="button">30m</button>
+                  <button class="mini-tab" data-candle-interval="4h" type="button">4h</button>
+                </div>
+                <div class="chart-zoom" aria-label="Candlestick chart zoom controls">
+                  <button id="candlePanEarlier" type="button" aria-label="Show earlier candles" title="Show earlier candles" disabled>&#8592;</button>
+                  <button id="candleZoomOut" type="button" aria-label="Zoom out" title="Zoom out" disabled>&#8722;</button>
+                  <button id="candleZoomReset" type="button" aria-label="Reset chart zoom" title="Reset chart zoom" disabled>&#8634;</button>
+                  <button id="candleZoomIn" type="button" aria-label="Zoom in" title="Zoom in" disabled>+</button>
+                  <button id="candlePanLater" type="button" aria-label="Show later candles" title="Show later candles" disabled>&#8594;</button>
+                </div>
+              </div>
+            </div>
+            <canvas id="candleChart" class="market-chart" aria-label="Candlestick chart"></canvas>
+            <div id="candleReadout" class="chart-readout">Move over the chart to inspect open, high, low, and close.</div>
+          </article>
+          <article class="chart-panel">
+            <div class="panel-head">
+              <div>
+                <span class="panel-label">Historical chart</span>
+                <strong id="historyTitle">--</strong>
+              </div>
+              <div class="segmented wide" aria-label="Historical range">
+                <button class="mini-tab active" data-history-range="day" type="button">Day</button>
+                <button class="mini-tab" data-history-range="week" type="button">Week</button>
+                <button class="mini-tab" data-history-range="threeMonth" type="button">3M</button>
+                <button class="mini-tab" data-history-range="sixMonth" type="button">6M</button>
+                <button class="mini-tab" data-history-range="oneYear" type="button">1Y</button>
+                <button class="mini-tab" data-history-range="all" type="button">All</button>
+              </div>
+            </div>
+            <canvas id="historyChart" class="market-chart" aria-label="Historical price chart"></canvas>
+            <div id="historyReadout" class="chart-readout">Move over the chart to inspect date and closing price.</div>
+          </article>
+          <article class="stats-panel">
+            <div class="panel-head">
+              <div>
+                <span class="panel-label">Full technicals</span>
+                <strong id="statsTitle">--</strong>
+              </div>
+            </div>
+            <div id="profileGrid" class="profile-grid"></div>
+            <div id="statsGrid" class="stats-grid"></div>
+          </article>
+          <article class="candle-analysis-panel">
+            <div class="panel-head">
+              <div>
+                <span class="panel-label">Candlestick analysis</span>
+                <strong>Clear patterns only</strong>
+              </div>
+            </div>
+            <p class="analysis-note">Each reading uses the latest available candles for its period and interval. Mixed or weak setups remain neutral.</p>
+            <div id="candleAnalysis" class="candle-analysis-grid" aria-live="polite"></div>
+          </article>
+        </section>
+      </section>
+
+      <section id="newsView" class="view">
+        <div id="newsStockStrip" class="price-strip" aria-label="Select stock news"></div>
+        <h3 class="group-label">Analyst reviews</h3>
+        <div id="analystReviews" class="analyst-review-grid"></div>
+        <h3 class="group-label">Headlines</h3>
+        <div id="newsList" class="news-list"></div>
+      </section>
+
+      <footer class="site-footer">
+        <span>Mag 7 Stock Desk</span>
+        <span>Alpaca, Nasdaq, and Yahoo quotes &middot; Google News headlines &middot; analyst reviews</span>
+      </footer>
+    </main>
+
+    <script src="app.js?v=20260707-scoring-v2"></script>
+  </body>
+</html>
