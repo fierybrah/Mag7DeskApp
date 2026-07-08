@@ -12,6 +12,13 @@ Mag 7 Stock Desk is a local web dashboard for monitoring the Magnificent 7 stock
 
 The app combines market data, technical indicators, candlestick pattern checks, analyst target context, and scoped news headlines. It is designed as a decision-support dashboard, not as automated financial advice.
 
+## What's New
+
+- **Rebalanced Setup Quality scoring.** The score is now a weighted average of six factors that each score `-1` to `+1`, replacing the old fixed point adjustments. Correlated moving-average checks are combined into one trend factor, RSI is graded on a smooth curve instead of hard thresholds, volume only counts when it confirms the day's direction, sentiment is averaged per item so coverage volume cannot inflate it, and analyst upside is measured against the typical consensus premium. Factors with missing data are excluded and the rest reweighted instead of being scored as neutral. See [Interpreting Entry Analysis](#interpreting-entry-analysis).
+- **Complete market statistics, including bid/ask.** The Technicals panel now reliably fills bid, ask, average volume, market cap, 52-week range, P/E, EPS, and dividend yield through a multi-source enrichment layer (Nasdaq, Yahoo, and Alpaca's latest-quote endpoint). Values are cached per symbol so the panel never regresses to `--`. Outside market hours, bid/ask show a note that they will appear during the next trading day if no quote source is available.
+- **Simplified UX.** The layout has been reorganized around three tabs — Entry Analysis, Technicals, and News — with redundant market-wide panels removed.
+- **Deployment support.** The repo now includes `package.json`, `render.yaml`, and a `Dockerfile` for running the app on Render, in Docker, or on any Node host. See [Deployment](#deployment).
+
 ## Main Views
 
 ### Entry Analysis
@@ -31,15 +38,16 @@ It includes:
 - Sentiment summary from news and analyst review text.
 - A short explanation list showing the signals that affected the score.
 
-The scoring is rule-based and uses:
+The scoring is rule-based and uses six weighted factors:
 
-- Price versus SMA 20 and SMA 50.
-- SMA 20 versus SMA 50 trend structure.
-- RSI 14.
-- Volume ratio.
+- Trend composite: price versus SMA 20, price versus SMA 50, and SMA 20 versus SMA 50 structure, graded by distance and averaged into a single factor.
+- RSI 14 momentum quality.
+- Direction-aware volume confirmation.
 - 4-hour candlestick pattern confirmation.
-- Analyst target upside/downside.
-- News and analyst sentiment keywords.
+- News and analyst sentiment.
+- Analyst target upside measured against the typical consensus premium.
+
+Each factor scores between `-1` and `+1` and carries a weight. Factors with missing data (for example, candles still loading or too few headlines) are excluded and the remaining weights are renormalized, so absent data neither fakes neutrality nor drags the score toward `50`. See [Interpreting Entry Analysis](#interpreting-entry-analysis) for the full rules.
 
 ### Technicals
 
@@ -53,8 +61,9 @@ It includes:
 - Candle interval controls: `5m`, `15m`, `30m`, and `4h`.
 - Candle period controls: `1D`, `1W`, `3M`, `6M`, `1Y`, and `All`.
 - Chart zoom and pan controls.
-- Company profile fields.
-- Market statistics.
+- Company profile fields (CEO, founded, employees, headquarters).
+- Market statistics: bid, ask, volume, average volume, open, today's high/low, market cap, 52-week high/low, P/E ratio, EPS, dividend yield, and previous close.
+  - Bid and ask come from live quote data. Outside market hours they may be unavailable from some providers; when no quote is available, the panel shows a note that the value will appear during the next trading day.
 - Technical indicators:
   - SMA 20
   - SMA 50
@@ -211,6 +220,16 @@ The app uses several data sources with fallback behavior:
 
 For market snapshots, the app prefers Alpaca when credentials are available. If Alpaca is not configured or temporarily unavailable, it tries Nasdaq and Yahoo public endpoints. If public providers rate-limit the request, the app preserves the last good snapshot where possible and can use cached candle data as a fallback instead of showing blank rows.
 
+### Fundamentals Enrichment
+
+Alpaca and Yahoo snapshot rows do not carry fundamentals (bid/ask, average volume, market cap, 52-week range, P/E, EPS, dividend yield), and a rate-limited cycle can blank them entirely. A separate enrichment layer fills these gaps on every snapshot:
+
+1. Nasdaq summary/info endpoints are tried first. Because Nasdaq stopped exposing EPS and P/E on its quote summary, trailing-twelve-month EPS is derived from the last four reported quarters, and P/E is computed from that EPS and the current price.
+2. Yahoo Finance chart data fills anything still missing, including the 52-week range derived from a year of daily history.
+3. Alpaca's latest-quote endpoint is tried as a third source for bid/ask. It returns the last known quote of the session even after hours, whereas Nasdaq only has bid/ask while the market is open.
+
+Fetched values are cached per symbol and refreshed every 10 minutes by default (`FUNDAMENTALS_REFRESH_MS`). The last good value is kept between refreshes, so the market statistics panel never regresses to `--` after it has shown real data once.
+
 ## Running Locally
 
 Install dependencies:
@@ -263,6 +282,7 @@ Default refresh intervals:
 
 - Market snapshot: every 60 seconds.
 - News and analyst review data: every 10 minutes.
+- Fundamentals enrichment (bid/ask, market cap, 52-week range, P/E, EPS): every 10 minutes.
 
 Override intervals:
 
@@ -275,6 +295,7 @@ Other environment variables:
 ```bash
 PORT=3000
 FETCH_TIMEOUT_MS=12000
+FUNDAMENTALS_REFRESH_MS=600000
 ALPACA_API_KEY=...
 ALPACA_API_SECRET=...
 ```
@@ -341,37 +362,26 @@ When Alpaca is configured, detailed candles use Alpaca first. Without Alpaca, Ya
 
 Entry Analysis is a structured setup review. It is not a guarantee and should not be treated as a buy or sell instruction.
 
-The `Setup Quality` score is a transparent rule-based score, not a z-score and not a machine-learning prediction. It starts at `50`, applies weighted adjustments, and clamps the final value between `0` and `100`. The current weights are heuristic: they are chosen to make trend, momentum, 4-hour structure, sentiment, and target context visible without letting any single non-price input dominate the score. They should be treated as a baseline that can be tuned later with backtesting.
+The `Setup Quality` score is a transparent rule-based score, not a z-score and not a machine-learning prediction. Each factor produces a value between `-1` and `+1` and carries a weight. The weighted average of the available factors maps to a `0-100` score centered on a neutral `50`:
 
-Current scoring rules:
+```text
+score = 50 + 50 * (sum(weight * value) / sum(weight))
+```
 
-| Signal | Rule | Score impact | Reasoning |
+Factors with missing data are excluded and the remaining weights are renormalized, so absent data neither fakes neutrality nor drags the score toward `50`. The explanation list under the score shows each factor's point contribution, plus a note for any factor that was excluded and why.
+
+The weights are heuristic: they are chosen to make trend, momentum, 4-hour structure, sentiment, and target context visible without letting any single non-price input dominate the score. They should be treated as a baseline that can be tuned later with backtesting.
+
+Current scoring factors:
+
+| Factor | Weight | How it is scored | Reasoning |
 | --- | --- | --- | --- |
-| Price vs SMA 20 | Price above SMA 20 | `+8` | The 20-day SMA is a short/intermediate trend filter. A price above it supports a constructive entry setup, but it is not enough by itself, so the weight is meaningful but not dominant. |
-| Price vs SMA 20 | Price below SMA 20 | `-8` | A price below the 20-day SMA suggests near-term weakness or loss of momentum. The penalty mirrors the positive rule because the same signal flips from support to resistance. |
-| Price vs SMA 50 | Price above SMA 50 | `+8` | The 50-day SMA is a broader trend filter. A price above it supports higher-quality long setups, but it is weighted the same as SMA 20 to avoid over-concentrating the score in moving averages. |
-| Price vs SMA 50 | Price below SMA 50 | `-8` | A price below the 50-day SMA weakens the broader setup. The penalty mirrors the positive rule because losing the 50-day trend is materially negative for entry quality. |
-| Trend structure | SMA 20 above SMA 50 | `+7` | This captures trend alignment, not just current price location. It is slightly lower than direct price/SMA checks because it changes more slowly and should confirm, not overpower, current price action. |
-| Trend structure | SMA 20 not above SMA 50 | `-7` | If SMA 20 is not above SMA 50, the trend structure is not fully constructive. The penalty is moderate because early reversals can occur before moving averages fully realign. |
-| RSI 14 | RSI between 45 and 65 | `+8` | This range suggests momentum is constructive without being overly extended. It receives a similar weight to trend checks because entry timing often depends on momentum quality. |
-| RSI 14 | RSI above 72 | `-8` | A high RSI can mean strength, but it also increases pullback risk for new entries. The penalty is meaningful because the panel is focused on entry quality, not just trend strength. |
-| RSI 14 | RSI below 35 | `-4` | A low RSI shows weakness, but it can also precede a reversal. The smaller penalty avoids rejecting all oversold recovery setups too aggressively. |
-| Volume | Volume ratio at or above 1.1x | `+5` | Above-average volume helps confirm participation, but volume alone is noisy. The smaller positive weight makes it a supporting confirmation signal. |
-| 4-hour candle pattern | Bullish pattern | `+10` | The 4-hour timeframe is important for entry timing and swing structure. A clear bullish pattern gets the largest single positive weight because it can confirm that buyers are stepping in. |
-| 4-hour candle pattern | Bearish pattern | `-10` | A bearish 4-hour pattern directly undermines entry timing. The penalty mirrors the bullish rule because 4-hour structure is a core confirmation input. |
-| Sentiment | Positive news/analyst sentiment | `+8` | Positive headline and analyst tone can support momentum and confidence. The weight is meaningful but capped because text sentiment can be noisy and should not override price action. |
-| Sentiment | Negative news/analyst sentiment | `-8` | Negative sentiment can pressure price or increase headline risk. The penalty mirrors the positive rule to keep sentiment balanced. |
-| Analyst target | Target implies at least 8% upside | `+8` | A target with meaningful upside gives external valuation support. The 8% threshold avoids rewarding tiny target gaps that may not be actionable after normal volatility. |
-| Analyst target | Target implies 3% or more downside | `-8` | Downside to target is penalized at a lower threshold because negative target gaps can indicate limited upside or valuation risk. The weight is meaningful but not dominant because analyst targets can lag price. |
-
-The model uses these inputs:
-
-- Trend confirmation.
-- Momentum quality.
-- Volume participation.
-- 4-hour candle behavior.
-- Analyst target upside/downside.
-- News and analyst sentiment.
+| Trend composite | `20` | Three graded checks averaged into one value: price vs SMA 20 (full credit at ±3% distance), price vs SMA 50 (full credit at ±5%), and SMA 20 vs SMA 50 (full credit at ±2%). | The three moving-average relationships are strongly correlated, so they are combined into one factor instead of counted three times. Grading by distance means barely above a moving average scores near zero rather than getting full credit. |
+| RSI 14 | `12` | Peaks at `+1` near RSI 55 and fades linearly toward both extremes (`value = 1 - |RSI - 55| / 20`), going negative beyond roughly 35 and 75. | Momentum is best for entries when constructive but not extended. The smooth curve penalizes overbought and oversold symmetrically with no threshold cliffs, so a small RSI change cannot flip the score. |
+| Volume | `6` | Scores only when volume is at least 1.1x its recent average, and adds in the direction of the day's move: heavy volume on an up day confirms, heavy volume on a down day counts against the setup. Near-average volume contributes zero. | Volume is a confirmation signal, not a standalone one. The old model treated any above-average volume as positive, which rewarded heavy selling. |
+| 4-hour candle pattern | `12` | Bullish pattern scores `+1`, bearish `-1`, neutral `0`. Requires at least 8 completed 4-hour candles; otherwise the factor is excluded and a note explains why. | The 4-hour timeframe drives entry timing and swing structure. While candles are still loading, the factor is excluded and the rest are reweighted rather than silently scored as neutral. |
+| Sentiment | `10` | Whole-word matches of positive/negative terms in headlines and analyst notes, capped at ±1 per item and averaged across items. Requires at least 3 scoped items; otherwise excluded. | Averaging per item means sheer coverage volume cannot push a mega cap positive on routine "buy"/"strong" analyst boilerplate. Whole-word matching stops false hits inside longer words. |
+| Analyst target | `10` | Upside to the consensus target is measured against a typical `+8%` premium: `value = (upside - 8) / 10`, clamped to ±1. | Mean analyst targets for these names sit above the price most of the time, so raw upside is persistently bullish. Centering on the typical premium makes only above-normal upside score positive. |
 
 Score labels:
 
@@ -380,11 +390,11 @@ Score labels:
 - `45-59`: `Watch`
 - `0-44`: `Avoid`
 
-Bias labels:
+Bias labels (symmetric around the neutral `50`):
 
-- `Bullish`: score is `65` or higher.
-- `Neutral`: score is between `41` and `64`.
-- `Bearish`: score is `40` or lower.
+- `Bullish`: score is `62` or higher.
+- `Neutral`: score is between `39` and `61`.
+- `Bearish`: score is `38` or lower.
 
 `Invalidation` is the level where the setup should be considered weakened by the model. It is not a personalized stop-loss recommendation.
 
@@ -408,6 +418,10 @@ This usually means no provider returned usable market snapshot data yet. Try:
 ### The 4-hour chart is empty locally
 
 If Alpaca is not configured, the app uses public fallback providers. These can rate-limit. In an Alpaca-configured environment, the 4-hour chart should use Alpaca `4Hour` bars.
+
+### Bid and Ask say "Appears during the next trading day"
+
+No provider returned a live quote, which is common outside market hours. Nasdaq only publishes bid/ask while the market is open. With Alpaca credentials configured, the app can usually show the last known quote of the session even after hours; without them, the values fill in when trading resumes.
 
 ### News loads but technical data does not
 
