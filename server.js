@@ -1321,6 +1321,146 @@ async function fetchStock(stock) {
   }
 }
 
+// Alpaca and Yahoo rows never carry fundamentals, and a rate-limited cycle can
+// blank them entirely. Fill gaps from a lightweight secondary fetch and keep
+// the last good value per symbol so the stats panel never regresses to "--".
+const FUNDAMENTAL_FIELDS = [
+  "bid", "ask", "averageVolume", "marketCap",
+  "fiftyTwoWeekHigh", "fiftyTwoWeekLow", "pe", "eps", "dividendYield"
+];
+const FUNDAMENTALS_REFRESH_MS = Number(process.env.FUNDAMENTALS_REFRESH_MS || 10 * 60 * 1000);
+const fundamentalsCache = new Map(); // symbol -> { values, lastAttempt }
+
+function finiteEntries(values) {
+  return Object.fromEntries(Object.entries(values).filter(([, value]) => Number.isFinite(value)));
+}
+
+async function fetchNasdaqFundamentals(symbol, price) {
+  const [summaryResult, infoResult, epsResult] = await Promise.allSettled([
+    fetchJson(nasdaqUrl(symbol, "summary")),
+    fetchJson(nasdaqUrl(symbol, "info")),
+    fetchJson(nasdaqUrl(symbol, "eps"))
+  ]);
+  if (summaryResult.status === "rejected" && infoResult.status === "rejected" && epsResult.status === "rejected") {
+    throw summaryResult.reason;
+  }
+
+  const summary = summaryResult.value?.data?.summaryData || {};
+  const primary = infoResult.value?.data?.primaryData || {};
+  const [fiftyTwoWeekHigh, fiftyTwoWeekLow] = parseRange(summary.FiftTwoWeekHighLow?.value);
+
+  // Nasdaq stopped exposing EPS and P/E on the quote summary; derive trailing
+  // twelve-month EPS from the last four reported quarters instead.
+  const reportedQuarters = (epsResult.value?.data?.earningsPerShare || [])
+    .filter((row) => row.type === "PreviousQuarter")
+    .map((row) => parseNumber(row.earnings))
+    .filter(Number.isFinite)
+    .slice(-4);
+  const eps = reportedQuarters.length === 4
+    ? reportedQuarters.reduce((sum, value) => sum + value, 0)
+    : null;
+  const pe = Number.isFinite(eps) && eps > 0 && Number.isFinite(price) ? price / eps : null;
+
+  return {
+    bid: parseNumber(primary.bidPrice),
+    ask: parseNumber(primary.askPrice),
+    averageVolume: parseNumber(summary.AverageVolume?.value),
+    marketCap: parseNumber(summary.MarketCap?.value),
+    fiftyTwoWeekHigh,
+    fiftyTwoWeekLow,
+    pe,
+    eps: formatNumber(eps),
+    dividendYield: parseNumber(summary.Yield?.value || summary.DividendYield?.value)
+  };
+}
+
+async function fetchYahooFundamentals(symbol) {
+  const payload = await fetchYahooJson(`https://query2.finance.yahoo.com/v8/finance/chart/${symbol}?range=1y&interval=1d&includePrePost=false`);
+  const meta = payload?.chart?.result?.[0]?.meta || {};
+  const historyRows = parseYahooHistoryRows(payload);
+  const highs = historyRows.map((row) => row.high).filter(Number.isFinite);
+  const lows = historyRows.map((row) => row.low).filter(Number.isFinite);
+  return {
+    fiftyTwoWeekHigh: parseNumber(meta.fiftyTwoWeekHigh) ?? (highs.length ? Math.max(...highs) : null),
+    fiftyTwoWeekLow: parseNumber(meta.fiftyTwoWeekLow) ?? (lows.length ? Math.min(...lows) : null),
+    averageVolume: average(historyRows.slice(-20).map((row) => row.volume))
+  };
+}
+
+async function fetchAlpacaQuote(symbol) {
+  const payload = await fetchAlpacaJson(`https://data.alpaca.markets/v2/stocks/${symbol}/quotes/latest?feed=iex`);
+  const quote = payload?.quote || {};
+  const bid = parseNumber(quote.bp);
+  const ask = parseNumber(quote.ap);
+  // Alpaca reports 0 for an empty side of the book.
+  return {
+    bid: bid > 0 ? bid : null,
+    ask: ask > 0 ? ask : null
+  };
+}
+
+async function enrichStockFields(stockRow) {
+  const symbol = stockRow.symbol;
+  let cached = fundamentalsCache.get(symbol);
+  if (!cached) {
+    cached = { values: {}, lastAttempt: 0 };
+    fundamentalsCache.set(symbol, cached);
+  }
+
+  // Whatever the primary source did deliver is the freshest truth.
+  FUNDAMENTAL_FIELDS.forEach((field) => {
+    const value = stockRow.stats?.[field] ?? stockRow[field];
+    if (Number.isFinite(value)) cached.values[field] = value;
+  });
+
+  const missing = () => FUNDAMENTAL_FIELDS.filter((field) => !Number.isFinite(cached.values[field]));
+  if (missing().length && Date.now() - cached.lastAttempt > FUNDAMENTALS_REFRESH_MS) {
+    cached.lastAttempt = Date.now();
+    try {
+      Object.assign(cached.values, finiteEntries(await fetchNasdaqFundamentals(symbol, parseNumber(stockRow.price))));
+    } catch (error) {
+      // Secondary source covers what it can; anything else keeps last good.
+    }
+    if (missing().length) {
+      try {
+        Object.assign(cached.values, finiteEntries(await fetchYahooFundamentals(symbol)));
+      } catch (error) {
+        // Keep last good values.
+      }
+    }
+    // Alpaca keeps the last known quote of the session, so it can supply
+    // bid/ask after hours when Nasdaq reports N/A. Requires API keys.
+    if ((!Number.isFinite(cached.values.bid) || !Number.isFinite(cached.values.ask)) && ALPACA_API_KEY && ALPACA_API_SECRET) {
+      try {
+        Object.assign(cached.values, finiteEntries(await fetchAlpacaQuote(symbol)));
+      } catch (error) {
+        // Keep last good values.
+      }
+    }
+  }
+
+  if (!stockRow.stats) stockRow.stats = {};
+  FUNDAMENTAL_FIELDS.forEach((field) => {
+    const value = cached.values[field];
+    if (!Number.isFinite(value)) return;
+    if (!Number.isFinite(stockRow[field])) stockRow[field] = value;
+    if (!Number.isFinite(stockRow.stats[field])) stockRow.stats[field] = value;
+  });
+
+  // After the close Nasdaq reports today's range as N/A; recover the latest
+  // session's high/low from the intraday candles already on the row.
+  const intraday = stockRow.candles?.fiveMinute || [];
+  if (intraday.length) {
+    const highs = intraday.map((candle) => candle.high).filter(Number.isFinite);
+    const lows = intraday.map((candle) => candle.low).filter(Number.isFinite);
+    if (!Number.isFinite(stockRow.dayHigh) && highs.length) stockRow.dayHigh = formatNumber(Math.max(...highs));
+    if (!Number.isFinite(stockRow.dayLow) && lows.length) stockRow.dayLow = formatNumber(Math.min(...lows));
+    if (!Number.isFinite(stockRow.stats.dayHigh)) stockRow.stats.dayHigh = stockRow.dayHigh;
+    if (!Number.isFinite(stockRow.stats.dayLow)) stockRow.stats.dayLow = stockRow.dayLow;
+  }
+  return stockRow;
+}
+
 async function collectSnapshot() {
   if (state.loading) return state;
 
@@ -1353,6 +1493,7 @@ async function collectSnapshot() {
       return fallbackStock(STOCKS[index]);
     });
 
+    await Promise.all(stockRows.map((row) => enrichStockFields(row).catch(() => row)));
     state.stocks = stockRows;
     state.lastUpdated = new Date().toISOString();
     state.nextRefresh = new Date(Date.now() + REFRESH_MS).toISOString();
