@@ -383,6 +383,49 @@ Current scoring factors:
 | Sentiment | `10` | Whole-word matches of positive/negative terms in headlines and analyst notes, capped at ±1 per item and averaged across items. Requires at least 3 scoped items; otherwise excluded. | Averaging per item means sheer coverage volume cannot push a mega cap positive on routine "buy"/"strong" analyst boilerplate. Whole-word matching stops false hits inside longer words. |
 | Analyst target | `10` | Upside to the consensus target is measured against a typical `+8%` premium: `value = (upside - 8) / 10`, clamped to ±1. | Mean analyst targets for these names sit above the price most of the time, so raw upside is persistently bullish. Centering on the typical premium makes only above-normal upside score positive. |
 
+### Worked Example
+
+A real AAPL snapshot (July 7, 2026): price `$310.66`, SMA 20 `$295.04`, SMA 50 `$295.06`, RSI `59.54`, volume ratio `0.62x`, day change `-0.64%`, consensus target `$325.20`, and 12 scoped news/analyst items.
+
+**1. Trend composite (weight 20) → value `+0.67`.** Three checks, each graded by distance, then averaged into one factor:
+
+- Price vs SMA 20: price is 5.3% above; full credit kicks in at 3%, so this saturates at `+1.0`.
+- Price vs SMA 50: price is 5.3% above; full credit at 5%, so also `+1.0`.
+- SMA 20 vs SMA 50: they are nearly identical, so essentially `0.0` — the trend structure has not confirmed yet.
+
+Average: `(1.0 + 1.0 + 0.0) / 3 = +0.67`. The averaging is the point: the three checks are highly correlated, so they count as one signal instead of three, and barely above an SMA scores near zero rather than getting full marks.
+
+**2. RSI 14 (weight 12) → value `+0.77`.** `1 - |59.54 - 55| / 20 = +0.77` — constructive momentum, not extended.
+
+**3. Volume (weight 6) → value `0`.** The `0.62x` ratio is below the `1.1x` bar, so volume confirms nothing. Note the weight stays in the denominator, so quiet volume mildly dilutes the score toward `50` — "nothing confirmed" is deliberately different from "no data."
+
+**4. 4-hour candle pattern (weight 12) → excluded.** Only 2 completed 4-hour candles were available (the model requires 8), so the factor is dropped and its weight leaves the denominator. The UI shows a note explaining the exclusion instead of silently scoring it neutral.
+
+**5. Sentiment (weight 10) → value `+0.50`.** The 12 items scored `+3` in total (each capped at ±1), so `3 / 12 × 2 = +0.50`. The per-item cap keeps a flood of routine "buy"/"strong" boilerplate from stacking up.
+
+**6. Analyst target (weight 10) → value `-0.33`.** The `$325.20` target implies `+4.68%` upside — below the typical `+8%` consensus premium, so `(4.68 - 8) / 10 = -0.33`. Below-typical upside counts against the setup.
+
+Putting it together:
+
+| Factor | Weight | Value | Points |
+| --- | --- | --- | --- |
+| Trend composite | 20 | +0.67 | +11 |
+| RSI 14 | 12 | +0.77 | +8 |
+| Volume | 6 | 0.00 | 0 |
+| 4h pattern | excluded | — | — |
+| Sentiment | 10 | +0.50 | +4 |
+| Analyst target | 10 | -0.33 | -3 |
+
+Active weight is `20 + 12 + 6 + 10 + 10 = 58` and the weighted sum is `24.27`:
+
+```text
+score = 50 + 50 * (24.27 / 58) = 71
+```
+
+`71` lands in the `Moderate` quality band and above the `Bullish` bias threshold of `62`. The Points column matches the explanation list shown under the score in the app: each factor's contribution out of the ±50 available.
+
+One nuance worth noticing: when the 4-hour candles finish loading, the pattern factor re-enters with weight 12 and every other factor's influence shrinks proportionally — so the score can shift without any input changing, purely because more evidence became available.
+
 Score labels:
 
 - `75-100`: `Strong`
