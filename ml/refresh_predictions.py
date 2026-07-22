@@ -77,6 +77,10 @@ def main() -> None:
     parser.add_argument("--publish", action="store_true", help="Commit and push the regenerated predictions file")
     parser.add_argument("--branch", default="main")
     args = parser.parse_args()
+    # publish() compares this against repo_root (always absolute) via
+    # relative_to(); Path.relative_to() cannot mix a relative path with an
+    # absolute one, so resolve against the invocation cwd up front.
+    args.output = args.output.resolve()
 
     config = json.loads(args.config.read_text())
     payload = fetch_and_score(args.symbols, args.artifacts, config, args.feed, args.fetch_years)
