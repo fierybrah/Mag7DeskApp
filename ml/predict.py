@@ -33,6 +33,49 @@ def confidence_label(confidence: float, threshold: float) -> str:
     return "Low"
 
 
+def score_latest(latest: pd.DataFrame, model, metadata: dict, config: dict) -> dict:
+    """Score one already-featured row per symbol and assemble the payload.
+
+    Shared by the CLI (scores from a full historical CSV) and the daily
+    refresh script (scores from a small incremental fetch), so the two
+    entrypoints cannot drift on the prediction/payload shape.
+    """
+    probabilities = model.predict_proba(latest)
+    threshold = config["probability_threshold"]
+    predictions = []
+    for row_position, (_, row) in enumerate(latest.iterrows()):
+        probability_map = {
+            name: round(float(probabilities[row_position, index]), 6)
+            for index, name in enumerate(model.classes_)
+        }
+        confidence = max(probability_map.values())
+        predictions.append({
+            "symbol": row["symbol"],
+            "asOf": str(pd.Timestamp(row["date"]).date()),
+            "horizonTradingDays": metadata["horizon_days"],
+            "recommendation": recommendation(probability_map, threshold),
+            "probabilities": {key.lower(): value for key, value in probability_map.items()},
+            "confidence": confidence_label(confidence, threshold),
+            "dataQuality": "ready" if np.isfinite(row[metadata["feature_columns"]].astype(float)).mean() >= 0.8 else "limited",
+        })
+    return {
+        "schemaVersion": 1,
+        "generatedAt": datetime.now(timezone.utc).isoformat(),
+        "model": {"name": metadata["model_name"], "version": metadata["model_version"]},
+        "benchmark": metadata["benchmark_symbol"],
+        "probabilityThreshold": threshold,
+        "predictions": predictions,
+    }
+
+
+def write_payload(payload: dict, output: Path) -> None:
+    output.parent.mkdir(parents=True, exist_ok=True)
+    # Write-then-rename so a concurrent server read never sees a partial file.
+    temp_output = output.with_name(f"{output.name}.tmp")
+    temp_output.write_text(json.dumps(payload, indent=2) + "\n")
+    temp_output.replace(output)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Score the latest daily row for each requested symbol")
     parser.add_argument("--data", type=Path, required=True)
@@ -60,38 +103,8 @@ def main() -> None:
     if requested:
         candidates = candidates[candidates["symbol"].isin(requested)]
     latest = candidates.sort_values("date").groupby("symbol", as_index=False).tail(1)
-    probabilities = model.predict_proba(latest)
-    generated_at = datetime.now(timezone.utc).isoformat()
-    predictions = []
-    for row_position, (_, row) in enumerate(latest.iterrows()):
-        probability_map = {
-            name: round(float(probabilities[row_position, index]), 6)
-            for index, name in enumerate(model.classes_)
-        }
-        confidence = max(probability_map.values())
-        threshold = config["probability_threshold"]
-        predictions.append({
-            "symbol": row["symbol"],
-            "asOf": str(pd.Timestamp(row["date"]).date()),
-            "horizonTradingDays": metadata["horizon_days"],
-            "recommendation": recommendation(probability_map, threshold),
-            "probabilities": {key.lower(): value for key, value in probability_map.items()},
-            "confidence": confidence_label(confidence, threshold),
-            "dataQuality": "ready" if np.isfinite(row[metadata["feature_columns"]].astype(float)).mean() >= 0.8 else "limited",
-        })
-    payload = {
-        "schemaVersion": 1,
-        "generatedAt": generated_at,
-        "model": {"name": metadata["model_name"], "version": metadata["model_version"]},
-        "benchmark": metadata["benchmark_symbol"],
-        "probabilityThreshold": config["probability_threshold"],
-        "predictions": predictions,
-    }
-    args.output.parent.mkdir(parents=True, exist_ok=True)
-    # Write-then-rename so a concurrent server read never sees a partial file.
-    temp_output = args.output.with_name(f"{args.output.name}.tmp")
-    temp_output.write_text(json.dumps(payload, indent=2) + "\n")
-    temp_output.replace(args.output)
+    payload = score_latest(latest, model, metadata, config)
+    write_payload(payload, args.output)
     print(json.dumps(payload, indent=2))
 
 

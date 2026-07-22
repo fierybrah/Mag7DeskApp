@@ -2,8 +2,8 @@
 
 This directory contains an offline, point-in-time machine-learning pipeline for
 the stock dashboard. It predicts `BUY`, `HOLD`, and `SELL` probabilities for a
-20-trading-day horizon relative to SPY. It does not replace the transparent
-Setup Quality score until walk-forward results demonstrate a durable advantage.
+20-trading-day horizon relative to SPY, and is what powers the app's Entry tab
+(the app has no separate rule-based score anymore).
 
 ## Input contract
 
@@ -94,6 +94,56 @@ and drawdown.
 The output is versioned JSON designed for the Node server to read. A prediction
 becomes `BUY` or `SELL` only when its respective calibrated probability is at
 least the threshold in `config.json`; otherwise it abstains with `HOLD`.
+
+## Daily automated refresh
+
+Running `ml.predict` by hand after every trading day isn't necessary — the
+model's features are all daily-bar based, so there's nothing new to score
+until the next close prints anyway. `ml/refresh_predictions.py` automates the
+"rerun it" part:
+
+```bash
+.venv/bin/python -m ml.refresh_predictions --publish
+```
+
+Unlike `ml.predict`, this does not read `data/daily_adjusted.csv`. It fetches
+only a small trailing window from Alpaca directly (`--fetch-years`, default 2
+— comfortably more than the ~260 sessions the longest feature lookback needs),
+scores it with the **already-trained** model at `ml/artifacts/`, and writes
+`data/ml_predictions.json`. It does not retrain — retraining is a separate,
+deliberate step (`ml.train`) that should stay infrequent and reviewed, not
+run automatically every day.
+
+`--publish` commits and pushes just the regenerated predictions file. This
+matters because Render runs the web service in its own isolated container
+with no shared filesystem — the only way a job's output reaches the running
+app is by pushing it back to git, which triggers the web service's normal
+auto-deploy.
+
+This runs on a schedule via GitHub Actions
+(`.github/workflows/refresh-predictions.yml`), not a Render Cron Job — Render
+Cron Jobs require a paid plan, while GitHub Actions' free tier comfortably
+covers one small daily job. In that workflow, `actions/checkout` already
+leaves `origin` authenticated for the run, so `publish()` just does a plain
+`git push origin`; no GitHub token handling lives in this script. It requires:
+
+- Two repository secrets set under **Settings → Secrets and variables →
+  Actions**: `ALPACA_API_KEY` and `ALPACA_API_SECRET`.
+- The workflow's `permissions: contents: write`, already set in the workflow
+  file, so the run's auto-provided token can push back to the repo.
+- The trained model and its metadata (`ml/artifacts/model.joblib`,
+  `ml/artifacts/metadata.json`) must be committed, since each workflow run
+  starts from a fresh checkout with no prior state. These two files are
+  intentionally *not* gitignored (see `.gitignore`); the larger training-only
+  diagnostics (`metrics.json`, `walk_forward_predictions.csv`) still are.
+
+If the market was closed or the latest bar hasn't changed, `--publish` prints
+"No prediction changes to publish" and skips the commit rather than creating
+an empty one.
+
+You can also trigger a run immediately from the GitHub UI (Actions tab →
+"Refresh ML predictions" → Run workflow) instead of waiting for the schedule,
+via the `workflow_dispatch` trigger in the workflow file.
 
 ## Test
 

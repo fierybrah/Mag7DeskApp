@@ -387,7 +387,9 @@ Current walk-forward accuracy is only modestly better than chance (~38% across t
 
 ### Keeping predictions fresh
 
-Predictions are a static file (`data/ml_predictions.json`) generated offline. Regenerate them after each trading day you care about:
+Predictions are a static file (`data/ml_predictions.json`) generated offline. In production this is automated with a GitHub Actions workflow (`.github/workflows/refresh-predictions.yml`) that runs `ml.refresh_predictions --publish` after each weekday's market close: it fetches a small trailing window of new bars, scores it with the already-trained model, and commits+pushes the updated file — which then triggers Render's normal auto-deploy of the web service. GitHub Actions was chosen over a Render Cron Job because Render's cron requires a paid plan, while Actions' free tier easily covers one small daily job. See [`ml/README.md`](ml/README.md#daily-automated-refresh) for the required repository secrets and why git is the hand-off between the job and the running app rather than a shared disk.
+
+To regenerate predictions by hand (locally, or against a full historical dataset) instead:
 
 ```bash
 .venv/bin/python -m ml.predict \
@@ -396,7 +398,7 @@ Predictions are a static file (`data/ml_predictions.json`) generated offline. Re
   --output data/ml_predictions.json
 ```
 
-If the file's `generatedAt` is older than `ML_STALE_AFTER_MS` (default 5 days), the server marks the outlook stale and the Entry panel shows a warning instead of presenting old probabilities as current.
+Either way, if the file's `generatedAt` is older than `ML_STALE_AFTER_MS` (default 5 days), the server marks the outlook stale and the Entry panel shows a warning instead of presenting old probabilities as current.
 
 ## Troubleshooting
 
