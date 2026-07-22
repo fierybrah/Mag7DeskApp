@@ -15,3 +15,9 @@ services:
         value: 600000
       - key: FETCH_TIMEOUT_MS
         value: 12000
+
+# The daily ML prediction refresh runs as a GitHub Actions workflow
+# (.github/workflows/refresh-predictions.yml), not a Render service — it
+# pushes data/ml_predictions.json back to this repo on its own schedule,
+# which triggers this web service's normal auto-deploy. See
+# ml/README.md#daily-automated-refresh.
