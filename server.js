@@ -11,6 +11,7 @@ const ALPACA_API_KEY = process.env.ALPACA_API_KEY;
 const ALPACA_API_SECRET = process.env.ALPACA_API_SECRET;
 const MAX_ALPACA_PAGES = 25;
 const PUBLIC_DIR = path.join(__dirname, "public");
+const ML_PREDICTIONS_PATH = path.join(__dirname, "data", "ml_predictions.json");
 
 const STOCKS = [
   { symbol: "AAPL", name: "Apple", sector: "Consumer Hardware", ceo: "Tim Cook", founded: "1976", headquarters: "Cupertino, California", employees: 164000 },
@@ -43,6 +44,47 @@ function json(res, status, payload) {
     "cache-control": "no-store"
   });
   res.end(body);
+}
+
+const ML_STALE_AFTER_MS = Number(process.env.ML_STALE_AFTER_MS || 5 * 24 * 60 * 60 * 1000);
+const mlOutlookCache = { mtimeMs: null, payload: null };
+
+function loadMlOutlook() {
+  try {
+    // Re-parse only when the file changes; keep the last good payload if a
+    // read races the offline pipeline rewriting the file.
+    const { mtimeMs } = fs.statSync(ML_PREDICTIONS_PATH);
+    if (mlOutlookCache.mtimeMs !== mtimeMs) {
+      const payload = JSON.parse(fs.readFileSync(ML_PREDICTIONS_PATH, "utf8"));
+      if (payload?.schemaVersion !== 1 || !Array.isArray(payload.predictions)) {
+        throw new Error("unsupported prediction schema");
+      }
+      mlOutlookCache.payload = payload;
+      mlOutlookCache.mtimeMs = mtimeMs;
+    }
+  } catch (error) {
+    if (!mlOutlookCache.payload) {
+      return {
+        status: "awaiting-model",
+        generatedAt: null,
+        model: null,
+        benchmark: "SPY",
+        predictions: [],
+        message: "Historical training and validation must complete before ML probabilities are shown."
+      };
+    }
+  }
+
+  const payload = mlOutlookCache.payload;
+  const generatedAt = Date.parse(payload.generatedAt || "");
+  if (!Number.isFinite(generatedAt) || Date.now() - generatedAt > ML_STALE_AFTER_MS) {
+    return {
+      status: "stale",
+      ...payload,
+      message: "These predictions are out of date. Rerun the ml.predict pipeline for a current outlook."
+    };
+  }
+  return { status: "shadow", ...payload };
 }
 
 function serveFile(req, res) {
@@ -1636,6 +1678,7 @@ function serializableState() {
     refreshIntervalMs: REFRESH_MS,
     newsRefreshIntervalMs: NEWS_REFRESH_MS,
     stocks: state.stocks,
+    mlOutlook: loadMlOutlook(),
     news: state.news,
     analystReviews: state.analystReviews
   };

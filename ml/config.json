@@ -1,0 +1,14 @@
+{
+  "model_name": "mag7_daily_outlook",
+  "model_version": "0.1.0",
+  "horizon_days": 20,
+  "buy_excess_return": 0.02,
+  "sell_excess_return": -0.02,
+  "probability_threshold": 0.60,
+  "benchmark_symbol": "SPY",
+  "minimum_training_rows": 1000,
+  "validation_folds": 5,
+  "validation_days": 126,
+  "random_state": 42
+}
+
