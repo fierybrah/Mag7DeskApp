@@ -70,16 +70,6 @@ function number(value) {
   return new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 }).format(value);
 }
 
-function clamp(value, min, max) {
-  return Math.max(min, Math.min(max, value));
-}
-
-function average(values) {
-  const valid = values.filter(Number.isFinite);
-  if (!valid.length) return null;
-  return valid.reduce((sum, value) => sum + value, 0) / valid.length;
-}
-
 function plainNumber(value) {
   if (!Number.isFinite(value)) return "--";
   return new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 }).format(value);
@@ -101,6 +91,24 @@ function dateTime(value) {
     hour: "numeric",
     minute: "2-digit"
   }).format(new Date(value));
+}
+
+function isUsMarketOpen(now = new Date()) {
+  // Regular session only (9:30-16:00 ET, Mon-Fri). Holidays are not modeled,
+  // so on a market holiday this can report open; callers should treat the
+  // result as a best-effort hint, not an exchange calendar.
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York",
+    weekday: "short",
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: false
+  }).formatToParts(now);
+  const part = (type) => parts.find((item) => item.type === type)?.value;
+  const weekday = part("weekday");
+  if (weekday === "Sat" || weekday === "Sun") return false;
+  const minutes = (Number(part("hour")) % 24) * 60 + Number(part("minute"));
+  return minutes >= 9 * 60 + 30 && minutes < 16 * 60;
 }
 
 function filteredStocks() {
@@ -526,229 +534,48 @@ function selectedTechnicalStock() {
   return stocks.find((stock) => stock.symbol === state.technicalSymbol) || stocks[0] || null;
 }
 
-const POSITIVE_SENTIMENT = /\b(upgrades?|upgraded|raises?|raised|boosts?|beats?|bullish|buy|outperform|overweight|strong|rall(?:y|ies)|upside)\b/g;
-const NEGATIVE_SENTIMENT = /\b(downgrades?|downgraded|lowers?|lowered|cuts?|miss(?:es|ed)?|bearish|sell|underperform|underweight|weak|lawsuits?|probes?|slumps?|plunges?)\b/g;
-
-function sentimentForStock(symbol) {
-  const textItems = [
-    ...(state.data?.news || []).filter((item) => item.symbol === symbol),
-    ...(state.data?.analystReviews || []).filter((item) => item.symbol === symbol)
-  ];
-  // Average per item (each capped at +/-1) so sheer coverage volume cannot
-  // push a mega cap positive on routine "buy"/"strong" analyst boilerplate.
-  let total = 0;
-  textItems.forEach((item) => {
-    const text = `${item.title || ""} ${item.action || ""} ${item.recommendation || ""}`.toLowerCase();
-    const positives = (text.match(POSITIVE_SENTIMENT) || []).length;
-    const negatives = (text.match(NEGATIVE_SENTIMENT) || []).length;
-    total += clamp(positives - negatives, -1, 1);
-  });
-  const count = textItems.length;
-  const value = count ? clamp((total / count) * 2, -1, 1) : 0;
-  const label = count >= 3 && value >= 0.35 ? "Positive" : count >= 3 && value <= -0.35 ? "Negative" : "Mixed";
-  return { value, label, count };
-}
-
-function analystTargetForStock(symbol) {
-  const reviews = (state.data?.analystReviews || []).filter((item) => item.symbol === symbol);
-  const consensus = reviews.find((item) => item.kind === "consensus" && Number.isFinite(item.targetMeanPrice));
-  if (consensus) return consensus.targetMeanPrice;
-  const targets = reviews.map((item) => item.targetMeanPrice).filter(Number.isFinite);
-  return targets.length ? average(targets) : null;
-}
-
-function entryAnalysisForStock(stock) {
-  const price = stock?.price;
-  if (!stock || !Number.isFinite(price)) {
-    return {
-      score: 0,
-      bias: "Unavailable",
-      quality: "Unavailable",
-      setup: "Waiting for market data",
-      entryZone: "--",
-      invalidation: "--",
-      target: "--",
-      riskReward: "--",
-      sentiment: "Unavailable",
-      reasons: ["Market data is not available for this symbol yet."]
-    };
-  }
-
-  const sma20 = stock.technicals?.sma20;
-  const sma50 = stock.technicals?.sma50;
-  const rsi = stock.technicals?.rsi14;
-  const volumeRatio = stock.technicals?.volumeRatio;
-  const target = analystTargetForStock(stock.symbol);
-  const sentiment = sentimentForStock(stock.symbol);
-  const fourHourKey = candleKey(stock.symbol, "week", "4h");
-  const fourHourData = state.candleData[fourHourKey];
-
-  if (!fourHourData && !state.candleLoadingKeys.has(fourHourKey)) {
-    loadDetailedCandles(stock.symbol, "week", "4h");
-  }
-
-  // Each factor scores -1..+1 and carries a weight. Missing factors are
-  // excluded and the remaining weights renormalized, so absent data neither
-  // fakes neutrality nor drags the score toward 50.
-  const factors = [];
-  const notes = [];
-
-  // Trend: the three SMA relationships are graded by distance and averaged
-  // into ONE factor, so the correlated checks cannot triple-count.
-  const trendParts = [];
-  if (Number.isFinite(sma20)) {
-    trendParts.push({ value: clamp((price - sma20) / sma20 / 0.03, -1, 1), text: `${price >= sma20 ? "above" : "below"} the 20D SMA` });
-  }
-  if (Number.isFinite(sma50)) {
-    trendParts.push({ value: clamp((price - sma50) / sma50 / 0.05, -1, 1), text: `${price >= sma50 ? "above" : "below"} the 50D SMA` });
-  }
-  if (Number.isFinite(sma20) && Number.isFinite(sma50)) {
-    trendParts.push({ value: clamp((sma20 - sma50) / sma50 / 0.02, -1, 1), text: `20D SMA ${sma20 >= sma50 ? "above" : "below"} the 50D` });
-  }
-  if (trendParts.length) {
-    factors.push({
-      weight: 20,
-      value: average(trendParts.map((part) => part.value)),
-      reason: `Trend: price is ${trendParts.map((part) => part.text).join(", ")}.`
-    });
-  }
-
-  // Momentum: peaks near RSI 55 and fades smoothly toward both extremes, so
-  // overbought and oversold are penalized symmetrically with no cliffs.
-  if (Number.isFinite(rsi)) {
-    const value = clamp(1 - Math.abs(rsi - 55) / 20, -1, 1);
-    const tone = value > 0.5 ? "constructive" : value >= 0 ? "acceptable" : rsi > 55 ? "extended" : "weak";
-    factors.push({ weight: 12, value, reason: `RSI 14 is ${number(rsi)} (${tone}).` });
-  }
-
-  // Volume confirms direction: heavy volume on a down day is a warning, not
-  // a bonus. Near-average volume says nothing.
-  if (Number.isFinite(volumeRatio) && Number.isFinite(stock.changePercent)) {
-    const heavy = volumeRatio >= 1.1;
-    const direction = stock.changePercent >= 0 ? 1 : -1;
-    const value = heavy ? clamp((volumeRatio - 1) / 0.5, 0, 1) * direction : 0;
-    factors.push({
-      weight: 6,
-      value,
-      reason: heavy
-        ? `Above-average volume is confirming today's ${direction > 0 ? "advance" : "decline"}.`
-        : "Volume is near its recent average, so it confirms nothing."
-    });
-  }
-
-  const completedFourHour = (fourHourData?.candles || []).filter((candle) => [candle.open, candle.high, candle.low, candle.close].every(Number.isFinite));
-  if (completedFourHour.length >= 8) {
-    const candleSignal = analyseCandlestickPattern(fourHourData.candles);
-    const value = candleSignal.signal === "Bullish" ? 1 : candleSignal.signal === "Bearish" ? -1 : 0;
-    factors.push({ weight: 12, value, reason: `4h pattern: ${candleSignal.text}` });
-  } else if (fourHourData) {
-    notes.push("Too few completed 4h candles to score the pattern, so it is excluded.");
-  } else {
-    notes.push("4h pattern is still loading and is excluded from the score until it arrives.");
-  }
-
-  if (sentiment.count >= 3) {
-    factors.push({ weight: 10, value: sentiment.value, reason: `${sentiment.label} news and analyst tone across ${sentiment.count} scoped items.` });
-  } else {
-    notes.push("Too few headlines and analyst notes to score sentiment yet.");
-  }
-
-  // Analyst targets for these names sit above price most of the time, so raw
-  // upside is measured against a typical +8% consensus premium.
-  if (Number.isFinite(target)) {
-    const upside = ((target - price) / price) * 100;
-    factors.push({
-      weight: 10,
-      value: clamp((upside - 8) / 10, -1, 1),
-      reason: `Analyst target implies ${percent(upside)} vs the typical +8% consensus premium.`
-    });
-  }
-
-  const totalWeight = factors.reduce((sum, factor) => sum + factor.weight, 0);
-  const weighted = factors.reduce((sum, factor) => sum + factor.weight * factor.value, 0);
-  const score = totalWeight ? Math.round(clamp(50 + 50 * (weighted / totalWeight), 0, 100)) : 50;
-  const reasons = [
-    ...factors.map((factor) => {
-      const points = Math.round((factor.weight * factor.value / totalWeight) * 50);
-      return `${factor.reason} (${points >= 0 ? "+" : ""}${points} pts)`;
-    }),
-    ...notes
-  ];
-
-  const bias = score >= 62 ? "Bullish" : score <= 38 ? "Bearish" : "Neutral";
-  const quality = score >= 75 ? "Strong" : score >= 60 ? "Moderate" : score >= 45 ? "Watch" : "Avoid";
-  const setup = bias === "Bullish"
-    ? (Number.isFinite(rsi) && rsi > 68 ? "Momentum watch" : "Pullback or continuation")
-    : bias === "Bearish" ? "Wait for repair" : "Confirmation needed";
-  const entryLow = Number.isFinite(sma20) && bias === "Bullish" ? Math.min(price, sma20 * 1.01) : price * 0.985;
-  const entryHigh = bias === "Bullish" ? price * 1.005 : price * 1.01;
-  // Nearest support below price, not the lowest of mixed timeframes.
-  const supports = [stock.dayLow, sma20, sma50, price * 0.97].filter((level) => Number.isFinite(level) && level < price);
-  const invalidation = supports.length ? Math.max(...supports) : price * 0.97;
-  const targetPrice = Number.isFinite(target) && target > price ? target : (Number.isFinite(stock.fiftyTwoWeekHigh) ? stock.fiftyTwoWeekHigh : price * 1.05);
-  const risk = price - invalidation;
-  const reward = targetPrice - price;
-  const riskReward = risk > 0 && reward > 0 ? `${number(reward / risk)}:1` : "--";
-
-  return {
-    score,
-    bias,
-    quality,
-    setup,
-    summary: `${quality} ${bias.toLowerCase()} setup: ${setup.toLowerCase()} with ${sentiment.label.toLowerCase()} sentiment.`,
-    entryZone: bias === "Bearish" ? "Wait for confirmation" : `${money(entryLow)} - ${money(entryHigh)}`,
-    invalidation: money(invalidation),
-    target: money(targetPrice),
-    riskReward,
-    sentiment: sentiment.label,
-    reasons: reasons.slice(0, 7)
-  };
-}
-
 function renderEntryAnalysis() {
   if (!els.entryAnalysis) return;
   const stock = selectedTechnicalStock();
-  const analysis = entryAnalysisForStock(stock);
-  const scoreClass = analysis.bias.toLowerCase();
+  const mlOutlook = state.data?.mlOutlook;
+  const mlPrediction = mlOutlook?.predictions?.find((prediction) => prediction.symbol === stock?.symbol);
+  const mlProbabilities = mlPrediction?.probabilities || {};
+  const mlRecommendation = mlPrediction?.recommendation || "UNAVAILABLE";
+  const mlClass = String(mlRecommendation).toLowerCase();
+  const horizonDays = mlPrediction?.horizonTradingDays;
+  const thresholdPercent = Number.isFinite(mlOutlook?.probabilityThreshold)
+    ? Math.round(mlOutlook.probabilityThreshold * 100)
+    : null;
+  const isStale = mlOutlook?.status === "stale";
   els.entryAnalysis.innerHTML = `
-    <article class="entry-panel">
-      <div class="entry-score ${scoreClass}">
-        <span>Setup Quality</span>
-        <strong>${analysis.score}</strong>
-        <b>${analysis.quality}</b>
-      </div>
-      <div class="entry-summary">
-        <div class="panel-head">
-          <div>
-            <span class="panel-label">Entry Analysis</span>
-            <strong>${stock?.symbol || "--"} · ${analysis.bias}</strong>
-          </div>
-          <span class="entry-sentiment">${analysis.sentiment} sentiment</span>
+    <article class="model-outlook-panel ${mlPrediction ? "ready" : "waiting"}">
+      <header class="model-outlook-head">
+        <div>
+          <span class="panel-label">${Number.isFinite(horizonDays) ? `${horizonDays}-day ML suggestion` : "ML suggestion"}</span>
+          <strong>${stock?.symbol || "--"} relative to ${mlOutlook?.benchmark || "SPY"}</strong>
         </div>
-        <p class="entry-one-line">${analysis.summary}</p>
-        <div class="entry-grid">
-          <div><span>Setup</span><strong>${analysis.setup}</strong></div>
-          <div><span>Entry zone</span><strong>${analysis.entryZone}</strong></div>
-          <div><span>Invalidation</span><strong>${analysis.invalidation}</strong></div>
-          <div><span>Target</span><strong>${analysis.target}</strong></div>
-          <div><span>Risk/reward</span><strong>${analysis.riskReward}</strong></div>
-        </div>
-        <ul class="entry-reasons">
-          ${analysis.reasons.map((reason) => `<li>${reason}</li>`).join("")}
-        </ul>
-        <details class="entry-rules">
-          <summary>Scoring rules</summary>
-          <div class="entry-rules-table">
-            <div><span>Trend composite</span><strong>weight 20</strong><p>Price vs the 20D and 50D SMAs plus their structure, graded by distance and averaged so the three correlated checks count as one signal instead of three.</p></div>
-            <div><span>RSI 14</span><strong>weight 12</strong><p>Peaks near RSI 55 and fades smoothly toward both extremes, so overbought and oversold are penalized symmetrically with no threshold cliffs.</p></div>
-            <div><span>Volume</span><strong>weight 6</strong><p>Above-average volume only confirms: it adds in the direction of the day's move, so heavy selling volume counts against the setup.</p></div>
-            <div><span>4h candle pattern</span><strong>weight 12</strong><p>Bullish or bearish 4h structure. While candles are still loading the factor is excluded and the rest are reweighted, not silently scored as neutral.</p></div>
-            <div><span>Sentiment</span><strong>weight 10</strong><p>Whole-word matches averaged per headline and analyst note, so a large volume of routine mega-cap coverage no longer reads as positive by default.</p></div>
-            <div><span>Analyst target</span><strong>weight 10</strong><p>Upside measured against the typical +8% consensus premium, because mean targets for these names sit above the price most of the time.</p></div>
-          </div>
-          <p>Each factor scores -1 to +1, is weighted as shown, and the weighted average maps to 0-100 around a neutral 50. Bias reads bullish at 62+ and bearish at 38-, symmetric around neutral. Missing factors are excluded and the remaining weights renormalized. This is a transparent rule-based setup score, not a prediction.</p>
-        </details>
+        <span class="model-status">${mlPrediction ? `As of ${mlPrediction.asOf}` : "Model unavailable"}</span>
+      </header>
+      ${isStale && mlPrediction ? `
+        <p class="model-stale-note">${mlOutlook.message || "These predictions are out of date."}</p>
+      ` : ""}
+      <div class="model-suggestion ${mlClass}">
+        <span>Suggestion</span>
+        <strong>${mlRecommendation}</strong>
+        <b>${mlPrediction?.confidence || "No confidence"} confidence</b>
       </div>
+      ${mlPrediction ? `
+        <p class="model-explanation">The model abstains with HOLD unless calibrated Buy or Sell probability reaches ${thresholdPercent === null ? "its configured threshold" : `${thresholdPercent}%`}. Predictions target performance versus ${mlOutlook.benchmark} over the next ${mlPrediction.horizonTradingDays} trading days.</p>
+        <div class="model-probabilities">
+          <div><span>Buy probability</span><strong>${Math.round((mlProbabilities.buy || 0) * 100)}%</strong></div>
+          <div><span>Hold probability</span><strong>${Math.round((mlProbabilities.hold || 0) * 100)}%</strong></div>
+          <div><span>Sell probability</span><strong>${Math.round((mlProbabilities.sell || 0) * 100)}%</strong></div>
+          <div><span>Data quality</span><strong>${mlPrediction.dataQuality}</strong></div>
+        </div>
+        <footer class="model-footnote">${mlOutlook.model?.name || "Model"} v${mlOutlook.model?.version || "--"} · Research decision support, not personalized financial advice.</footer>
+      ` : `
+        <p class="model-explanation">${mlOutlook?.message || "No trained ML prediction is available."}</p>
+      `}
     </article>
   `;
 }
@@ -768,8 +595,9 @@ function renderStats(stock) {
   ];
   const signal = stock.technicals?.signal || "Unavailable";
   const bidValue = stock.stats?.bid ?? stock.bid;
+  const marketClosed = !isUsMarketOpen();
   const askValue = stock.stats?.ask ?? stock.ask;
-  const quoteNote = "Appears during the next trading day";
+  const quoteNote = marketClosed ? "Appears during the next trading day" : "Waiting for a live quote";
   const stats = [
     ["Bid", money(bidValue), Number.isFinite(bidValue) ? "" : quoteNote],
     ["Ask", money(askValue), Number.isFinite(askValue) ? "" : quoteNote],
