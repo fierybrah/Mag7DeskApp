@@ -1,5 +1,12 @@
 # Mag 7 Stock Desk
 
+> **ML-driven Entry view:** The Entry tab is now powered by an offline,
+> leakage-aware machine-learning pipeline in [`ml/`](ml/README.md) that
+> predicts 20-trading-day performance relative to SPY. The previous rule-based
+> Setup Quality score has been retired. The model's walk-forward performance is
+> only modestly better than chance, so treat it as an early research model that
+> abstains honestly, not a proven trading signal.
+
 Mag 7 Stock Desk is a local web dashboard for monitoring the Magnificent 7 stocks:
 
 - Apple (`AAPL`)
@@ -14,7 +21,7 @@ The app combines market data, technical indicators, candlestick pattern checks, 
 
 ## What's New
 
-- **Rebalanced Setup Quality scoring.** The score is now a weighted average of six factors that each score `-1` to `+1`, replacing the old fixed point adjustments. Correlated moving-average checks are combined into one trend factor, RSI is graded on a smooth curve instead of hard thresholds, volume only counts when it confirms the day's direction, sentiment is averaged per item so coverage volume cannot inflate it, and analyst upside is measured against the typical consensus premium. Factors with missing data are excluded and the rest reweighted instead of being scored as neutral. See [Interpreting Entry Analysis](#interpreting-entry-analysis).
+- **ML-based Entry Analysis.** The Entry tab now shows a trained machine-learning recommendation — Buy, Hold, or Sell with calibrated probabilities — for each stock's expected 20-trading-day performance relative to SPY. Predictions are generated offline by the pipeline in `ml/` and served to the app through a versioned JSON file; the model abstains with Hold unless a calibrated Buy or Sell probability clears the configured threshold. The former rule-based Setup Quality score has been removed. See [Interpreting the ML Suggestion](#interpreting-the-ml-suggestion).
 - **Complete market statistics, including bid/ask.** The Technicals panel now reliably fills bid, ask, average volume, market cap, 52-week range, P/E, EPS, and dividend yield through a multi-source enrichment layer (Nasdaq, Yahoo, and Alpaca's latest-quote endpoint). Values are cached per symbol so the panel never regresses to `--`. Outside market hours, bid/ask show a note that they will appear during the next trading day if no quote source is available.
 - **Simplified UX.** The layout has been reorganized around three tabs — Entry Analysis, Technicals, and News — with redundant market-wide panels removed.
 - **Deployment support.** The repo now includes `package.json`, `render.yaml`, and a `Dockerfile` for running the app on Render, in Docker, or on any Node host. See [Deployment](#deployment).
@@ -23,31 +30,19 @@ The app combines market data, technical indicators, candlestick pattern checks, 
 
 ### Entry Analysis
 
-Entry Analysis is the first tab and is intended to summarize whether the selected stock has a constructive setup.
+Entry Analysis is the first tab and shows the trained model's outlook for the selected stock.
 
 It includes:
 
 - A synced stock selector for the Mag 7 symbols.
-- A `Setup Quality` score from `0` to `100`.
-- Bias: bullish, neutral, bearish, or unavailable.
-- Setup type, such as pullback, continuation, confirmation needed, or wait for repair.
-- Entry zone.
-- Invalidation level.
-- Target price.
-- Estimated risk/reward.
-- Sentiment summary from news and analyst review text.
-- A short explanation list showing the signals that affected the score.
+- A Buy, Hold, or Sell suggestion for the next 20 trading days relative to SPY.
+- A confidence level (High, Moderate, or Low) derived from the calibrated probabilities.
+- The calibrated Buy, Hold, and Sell probabilities.
+- The prediction date (`As of`), benchmark, and data-quality status.
+- The model name and version.
+- A staleness warning when the prediction file has not been regenerated recently.
 
-The scoring is rule-based and uses six weighted factors:
-
-- Trend composite: price versus SMA 20, price versus SMA 50, and SMA 20 versus SMA 50 structure, graded by distance and averaged into a single factor.
-- RSI 14 momentum quality.
-- Direction-aware volume confirmation.
-- 4-hour candlestick pattern confirmation.
-- News and analyst sentiment.
-- Analyst target upside measured against the typical consensus premium.
-
-Each factor scores between `-1` and `+1` and carries a weight. Factors with missing data (for example, candles still loading or too few headlines) are excluded and the remaining weights are renormalized, so absent data neither fakes neutrality nor drags the score toward `50`. See [Interpreting Entry Analysis](#interpreting-entry-analysis) for the full rules.
+Predictions are generated offline by the `ml/` pipeline and written to `data/ml_predictions.json`, which the Node server serves with each snapshot. The browser never sees the model or any credentials. A suggestion is only displayed as Buy or Sell when its calibrated probability reaches the threshold in `ml/config.json` (currently 60%); otherwise the model abstains with Hold. See [Interpreting the ML Suggestion](#interpreting-the-ml-suggestion).
 
 ### Technicals
 
@@ -149,7 +144,9 @@ flowchart TD
 | `public/index.html` | Page skeleton. Defines the tab structure, panels, placeholders, chart canvases, and script/style references. |
 | `public/app.js` | Frontend logic. Fetches API data, manages state, switches tabs, syncs stock selectors, calculates Entry Analysis, renders news/reviews, and draws charts. |
 | `public/styles.css` | Visual layer. Controls layout, cards, tabs, responsive behavior, Entry Analysis styling, chart panels, News cards, and the scoring rules drawer. |
-| `README.md` | Project documentation. Explains usage, setup, deployment, APIs, scoring rules, and troubleshooting. It is not loaded by the running app. |
+| `ml/` | Offline machine-learning pipeline: data fetching, feature engineering, training, walk-forward validation, and prediction generation. Never loaded by the running app. |
+| `data/ml_predictions.json` | Versioned prediction file produced by `ml/predict.py` and read by `server.js`. Must be committed so deployments that build from git can serve it. |
+| `README.md` | Project documentation. Explains usage, setup, deployment, APIs, the ML suggestion, and troubleshooting. It is not loaded by the running app. |
 | `package.json` | Node project metadata and scripts. `npm start` depends on this file because it runs `node server.js`. |
 | `render.yaml` | Render deployment configuration. Defines build/start commands, health check path, and default environment variables. |
 | `Dockerfile` | Optional container deployment definition. Builds a Node image and starts the app with `npm start`. |
@@ -296,9 +293,12 @@ Other environment variables:
 PORT=3000
 FETCH_TIMEOUT_MS=12000
 FUNDAMENTALS_REFRESH_MS=600000
+ML_STALE_AFTER_MS=432000000
 ALPACA_API_KEY=...
 ALPACA_API_SECRET=...
 ```
+
+`ML_STALE_AFTER_MS` controls how old `data/ml_predictions.json` may be (by its `generatedAt` timestamp) before the Entry panel flags the outlook as stale. The default is 5 days.
 
 ## API Endpoints
 
@@ -358,90 +358,45 @@ Supported intervals:
 
 When Alpaca is configured, detailed candles use Alpaca first. Without Alpaca, Yahoo is used where possible. For `4h` Yahoo fallback, the app fetches `1h` candles and aggregates them into 4-hour candles.
 
-## Interpreting Entry Analysis
+## Interpreting the ML Suggestion
 
-Entry Analysis is a structured setup review. It is not a guarantee and should not be treated as a buy or sell instruction.
+The Entry tab's suggestion comes from a trained classifier, not a guarantee, and should not be treated as a buy or sell instruction.
 
-The `Setup Quality` score is a transparent rule-based score, not a z-score and not a machine-learning prediction. Each factor produces a value between `-1` and `+1` and carries a weight. The weighted average of the available factors maps to a `0-100` score centered on a neutral `50`:
+### What the model predicts
 
-```text
-score = 50 + 50 * (sum(weight * value) / sum(weight))
+The model predicts each stock's performance **relative to SPY over the next 20 trading days**. Labels are defined on excess return:
+
+- `BUY`: expected to outperform SPY by more than 2%.
+- `SELL`: expected to underperform SPY by more than 2%.
+- `HOLD`: expected result falls between those thresholds.
+
+The displayed probabilities are calibrated on a held-out historical window, so "62% Buy" is intended to mean roughly 62 of 100 similar situations outperformed. A suggestion is only shown as Buy or Sell when its calibrated probability reaches the `probability_threshold` in `ml/config.json` (currently `0.60`); otherwise the model **abstains with Hold**. Confidence bands derive from the same threshold: `Moderate` at the threshold, `High` at the threshold plus 15 points.
+
+### How it was trained
+
+- ~10 years of split/dividend-adjusted daily OHLCV data for 100 liquid US stocks, including the Mag 7 and SPY.
+- Strictly trailing, point-in-time features (returns, moving-average structure, RSI, volatility, ATR, drawdowns, volume, gaps, benchmark context, calendar fields); tests verify that adding future rows cannot change historical feature values.
+- Walk-forward validation over five expanding date folds with a 20-session embargo between training and validation, instead of random splits.
+- A multinomial logistic regression and a gradient-boosted model were compared; logistic regression won on log loss and was selected.
+
+Details, commands, and the full input contract live in [`ml/README.md`](ml/README.md).
+
+### Honest limitations
+
+Current walk-forward accuracy is only modestly better than chance (~38% across three classes), which is why all seven stocks commonly show `HOLD` with `Low` confidence. That is the abstention mechanism working as intended — the app does not manufacture high-confidence recommendations from a weak signal. Treat this as an early research model whose value is still being established.
+
+### Keeping predictions fresh
+
+Predictions are a static file (`data/ml_predictions.json`) generated offline. Regenerate them after each trading day you care about:
+
+```bash
+.venv/bin/python -m ml.predict \
+  --data data/daily_adjusted.csv \
+  --symbols AAPL MSFT GOOGL AMZN NVDA META TSLA \
+  --output data/ml_predictions.json
 ```
 
-Factors with missing data are excluded and the remaining weights are renormalized, so absent data neither fakes neutrality nor drags the score toward `50`. The explanation list under the score shows each factor's point contribution, plus a note for any factor that was excluded and why.
-
-The weights are heuristic: they are chosen to make trend, momentum, 4-hour structure, sentiment, and target context visible without letting any single non-price input dominate the score. They should be treated as a baseline that can be tuned later with backtesting.
-
-Current scoring factors:
-
-| Factor | Weight | How it is scored | Reasoning |
-| --- | --- | --- | --- |
-| Trend composite | `20` | Three graded checks averaged into one value: price vs SMA 20 (full credit at ±3% distance), price vs SMA 50 (full credit at ±5%), and SMA 20 vs SMA 50 (full credit at ±2%). | The three moving-average relationships are strongly correlated, so they are combined into one factor instead of counted three times. Grading by distance means barely above a moving average scores near zero rather than getting full credit. |
-| RSI 14 | `12` | Peaks at `+1` near RSI 55 and fades linearly toward both extremes (`value = 1 - |RSI - 55| / 20`), going negative beyond roughly 35 and 75. | Momentum is best for entries when constructive but not extended. The smooth curve penalizes overbought and oversold symmetrically with no threshold cliffs, so a small RSI change cannot flip the score. |
-| Volume | `6` | Scores only when volume is at least 1.1x its recent average, and adds in the direction of the day's move: heavy volume on an up day confirms, heavy volume on a down day counts against the setup. Near-average volume contributes zero. | Volume is a confirmation signal, not a standalone one. The old model treated any above-average volume as positive, which rewarded heavy selling. |
-| 4-hour candle pattern | `12` | Bullish pattern scores `+1`, bearish `-1`, neutral `0`. Requires at least 8 completed 4-hour candles; otherwise the factor is excluded and a note explains why. | The 4-hour timeframe drives entry timing and swing structure. While candles are still loading, the factor is excluded and the rest are reweighted rather than silently scored as neutral. |
-| Sentiment | `10` | Whole-word matches of positive/negative terms in headlines and analyst notes, capped at ±1 per item and averaged across items. Requires at least 3 scoped items; otherwise excluded. | Averaging per item means sheer coverage volume cannot push a mega cap positive on routine "buy"/"strong" analyst boilerplate. Whole-word matching stops false hits inside longer words. |
-| Analyst target | `10` | Upside to the consensus target is measured against a typical `+8%` premium: `value = (upside - 8) / 10`, clamped to ±1. | Mean analyst targets for these names sit above the price most of the time, so raw upside is persistently bullish. Centering on the typical premium makes only above-normal upside score positive. |
-
-### Worked Example
-
-A real AAPL snapshot (July 7, 2026): price `$310.66`, SMA 20 `$295.04`, SMA 50 `$295.06`, RSI `59.54`, volume ratio `0.62x`, day change `-0.64%`, consensus target `$325.20`, and 12 scoped news/analyst items.
-
-**1. Trend composite (weight 20) → value `+0.67`.** Three checks, each graded by distance, then averaged into one factor:
-
-- Price vs SMA 20: price is 5.3% above; full credit kicks in at 3%, so this saturates at `+1.0`.
-- Price vs SMA 50: price is 5.3% above; full credit at 5%, so also `+1.0`.
-- SMA 20 vs SMA 50: they are nearly identical, so essentially `0.0` — the trend structure has not confirmed yet.
-
-Average: `(1.0 + 1.0 + 0.0) / 3 = +0.67`. The averaging is the point: the three checks are highly correlated, so they count as one signal instead of three, and barely above an SMA scores near zero rather than getting full marks.
-
-**2. RSI 14 (weight 12) → value `+0.77`.** `1 - |59.54 - 55| / 20 = +0.77` — constructive momentum, not extended.
-
-**3. Volume (weight 6) → value `0`.** The `0.62x` ratio is below the `1.1x` bar, so volume confirms nothing. Note the weight stays in the denominator, so quiet volume mildly dilutes the score toward `50` — "nothing confirmed" is deliberately different from "no data."
-
-**4. 4-hour candle pattern (weight 12) → excluded.** Only 2 completed 4-hour candles were available (the model requires 8), so the factor is dropped and its weight leaves the denominator. The UI shows a note explaining the exclusion instead of silently scoring it neutral.
-
-**5. Sentiment (weight 10) → value `+0.50`.** The 12 items scored `+3` in total (each capped at ±1), so `3 / 12 × 2 = +0.50`. The per-item cap keeps a flood of routine "buy"/"strong" boilerplate from stacking up.
-
-**6. Analyst target (weight 10) → value `-0.33`.** The `$325.20` target implies `+4.68%` upside — below the typical `+8%` consensus premium, so `(4.68 - 8) / 10 = -0.33`. Below-typical upside counts against the setup.
-
-Putting it together:
-
-| Factor | Weight | Value | Points |
-| --- | --- | --- | --- |
-| Trend composite | 20 | +0.67 | +11 |
-| RSI 14 | 12 | +0.77 | +8 |
-| Volume | 6 | 0.00 | 0 |
-| 4h pattern | excluded | — | — |
-| Sentiment | 10 | +0.50 | +4 |
-| Analyst target | 10 | -0.33 | -3 |
-
-Active weight is `20 + 12 + 6 + 10 + 10 = 58` and the weighted sum is `24.27`:
-
-```text
-score = 50 + 50 * (24.27 / 58) = 71
-```
-
-`71` lands in the `Moderate` quality band and above the `Bullish` bias threshold of `62`. The Points column matches the explanation list shown under the score in the app: each factor's contribution out of the ±50 available.
-
-One nuance worth noticing: when the 4-hour candles finish loading, the pattern factor re-enters with weight 12 and every other factor's influence shrinks proportionally — so the score can shift without any input changing, purely because more evidence became available.
-
-Score labels:
-
-- `75-100`: `Strong`
-- `60-74`: `Moderate`
-- `45-59`: `Watch`
-- `0-44`: `Avoid`
-
-Bias labels (symmetric around the neutral `50`):
-
-- `Bullish`: score is `62` or higher.
-- `Neutral`: score is between `39` and `61`.
-- `Bearish`: score is `38` or lower.
-
-`Invalidation` is the level where the setup should be considered weakened by the model. It is not a personalized stop-loss recommendation.
-
-The rule-based model is used first because it is explainable, easy to debug, and does not require a large labeled training dataset. A future machine-learning model could be added later if the app stores historical setups and can validate that an ML model outperforms this rule-based baseline.
+If the file's `generatedAt` is older than `ML_STALE_AFTER_MS` (default 5 days), the server marks the outlook stale and the Entry panel shows a warning instead of presenting old probabilities as current.
 
 ## Troubleshooting
 
@@ -462,9 +417,13 @@ This usually means no provider returned usable market snapshot data yet. Try:
 
 If Alpaca is not configured, the app uses public fallback providers. These can rate-limit. In an Alpaca-configured environment, the 4-hour chart should use Alpaca `4Hour` bars.
 
-### Bid and Ask say "Appears during the next trading day"
+### Bid and Ask show a note instead of a value
 
-No provider returned a live quote, which is common outside market hours. Nasdaq only publishes bid/ask while the market is open. With Alpaca credentials configured, the app can usually show the last known quote of the session even after hours; without them, the values fill in when trading resumes.
+No provider returned a live quote. Outside market hours the note reads "Appears during the next trading day" (Nasdaq only publishes bid/ask while the market is open); during the session it reads "Waiting for a live quote," which means providers are temporarily failing or rate-limited. With Alpaca credentials configured, the app can usually show the last known quote of the session even after hours.
+
+### The Entry tab says "Model unavailable"
+
+The server could not load `data/ml_predictions.json`. Run the prediction step from [`ml/README.md`](ml/README.md) to generate it, and make sure the file is committed if the app was deployed from git. If the panel instead shows a stale-predictions warning, the file exists but its `generatedAt` is older than `ML_STALE_AFTER_MS` — rerun `ml.predict` with fresh daily data.
 
 ### News loads but technical data does not
 
@@ -494,6 +453,8 @@ ALPACA_API_SECRET
 ```
 
 6. Deploy and open the Render URL.
+
+Render builds from the git repository, so `data/ml_predictions.json` must be committed for the Entry tab to work in production — it is tracked on purpose (see `.gitignore`). After regenerating predictions, commit and push the updated file; otherwise the deployed app serves the previous predictions until they age past `ML_STALE_AFTER_MS` and are flagged stale.
 
 ### Docker
 
