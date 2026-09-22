@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-09-22T00:25:08.149102+00:00",
+  "generatedAt": "2026-09-22T23:55:44.109213+00:00",
   "model": {
     "name": "mag7_daily_outlook",
     "version": "0.1.0"
@@ -10,91 +10,91 @@
   "predictions": [
     {
       "symbol": "NVDA",
-      "asOf": "2026-09-21",
+      "asOf": "2026-09-22",
       "horizonTradingDays": 20,
       "recommendation": "HOLD",
       "probabilities": {
-        "buy": 0.430492,
-        "hold": 0.1151,
-        "sell": 0.454408
+        "buy": 0.431188,
+        "hold": 0.118844,
+        "sell": 0.449968
       },
       "confidence": "Low",
       "dataQuality": "ready"
     },
     {
       "symbol": "AAPL",
-      "asOf": "2026-09-21",
+      "asOf": "2026-09-22",
       "horizonTradingDays": 20,
       "recommendation": "HOLD",
       "probabilities": {
-        "buy": 0.418143,
-        "hold": 0.171872,
-        "sell": 0.409985
+        "buy": 0.415698,
+        "hold": 0.173366,
+        "sell": 0.410936
       },
       "confidence": "Low",
       "dataQuality": "ready"
     },
     {
       "symbol": "AMZN",
-      "asOf": "2026-09-21",
+      "asOf": "2026-09-22",
       "horizonTradingDays": 20,
       "recommendation": "HOLD",
       "probabilities": {
-        "buy": 0.410355,
-        "hold": 0.178786,
-        "sell": 0.410859
+        "buy": 0.411274,
+        "hold": 0.177733,
+        "sell": 0.410993
       },
       "confidence": "Low",
       "dataQuality": "ready"
     },
     {
       "symbol": "GOOGL",
-      "asOf": "2026-09-21",
+      "asOf": "2026-09-22",
       "horizonTradingDays": 20,
       "recommendation": "HOLD",
       "probabilities": {
-        "buy": 0.388021,
-        "hold": 0.187042,
-        "sell": 0.424937
+        "buy": 0.394734,
+        "hold": 0.182597,
+        "sell": 0.422669
       },
       "confidence": "Low",
       "dataQuality": "ready"
     },
     {
       "symbol": "META",
-      "asOf": "2026-09-21",
+      "asOf": "2026-09-22",
       "horizonTradingDays": 20,
       "recommendation": "HOLD",
       "probabilities": {
-        "buy": 0.417474,
-        "hold": 0.154787,
-        "sell": 0.427739
+        "buy": 0.409416,
+        "hold": 0.158498,
+        "sell": 0.432085
       },
       "confidence": "Low",
       "dataQuality": "ready"
     },
     {
       "symbol": "MSFT",
-      "asOf": "2026-09-21",
+      "asOf": "2026-09-22",
       "horizonTradingDays": 20,
       "recommendation": "HOLD",
       "probabilities": {
-        "buy": 0.383139,
-        "hold": 0.22419,
-        "sell": 0.39267
+        "buy": 0.383894,
+        "hold": 0.225973,
+        "sell": 0.390132
       },
       "confidence": "Low",
       "dataQuality": "ready"
     },
     {
       "symbol": "TSLA",
-      "asOf": "2026-09-21",
+      "asOf": "2026-09-22",
       "horizonTradingDays": 20,
       "recommendation": "HOLD",
       "probabilities": {
-        "buy": 0.447085,
-        "hold": 0.104566,
-        "sell": 0.448349
+        "buy": 0.446272,
+        "hold": 0.107703,
+        "sell": 0.446026
       },
       "confidence": "Low",
       "dataQuality": "ready"
