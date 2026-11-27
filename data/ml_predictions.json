@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-11-26T03:51:18.933797+00:00",
+  "generatedAt": "2026-11-27T03:52:32.255736+00:00",
   "model": {
     "name": "mag7_daily_outlook",
     "version": "0.1.0"
@@ -14,9 +14,9 @@
       "horizonTradingDays": 20,
       "recommendation": "HOLD",
       "probabilities": {
-        "buy": 0.474191,
-        "hold": 0.085012,
-        "sell": 0.440797
+        "buy": 0.474221,
+        "hold": 0.08503,
+        "sell": 0.440749
       },
       "confidence": "Low",
       "dataQuality": "ready"
@@ -42,7 +42,7 @@
       "probabilities": {
         "buy": 0.419322,
         "hold": 0.151316,
-        "sell": 0.429362
+        "sell": 0.429361
       },
       "confidence": "Low",
       "dataQuality": "ready"
@@ -66,9 +66,9 @@
       "horizonTradingDays": 20,
       "recommendation": "HOLD",
       "probabilities": {
-        "buy": 0.432743,
-        "hold": 0.136499,
-        "sell": 0.430758
+        "buy": 0.432759,
+        "hold": 0.136517,
+        "sell": 0.430724
       },
       "confidence": "Low",
       "dataQuality": "ready"
